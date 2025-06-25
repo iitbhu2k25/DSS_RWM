@@ -75,7 +75,7 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
 
         const vectorSource = new VectorSource({
           features: new GeoJSON().readFeatures(geojsonData, {
-            featureProjection: 'EPSG:4326',
+            featureProjection: 'EPSG:3857',
           }),
         });
 

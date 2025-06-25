@@ -134,7 +134,7 @@ const Dashboard = () => {
   return (
     <div className="flex h-screen">
       <div className="w-1/2 p-4 overflow-y-auto">
-        <h1 className="text-2xl font-bold mb-4">Water Quality Dashboard</h1>
+       
         <select
           className="mb-4 p-2 border rounded"
           value={selectedAttribute}

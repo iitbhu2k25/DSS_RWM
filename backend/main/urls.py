@@ -11,4 +11,5 @@ urlpatterns = [
     
     path("auth/", include("authapp.urls")),
     path("gwa/", include("gwa.urls")),
+    path("rwm/", include("rwm.urls"))
 ]

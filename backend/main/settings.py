@@ -31,6 +31,7 @@ INSTALLED_APPS = [
     "mapplot",
     "authapp",
     "gwa",
+    "rwm",
 ]
 
 MIDDLEWARE = [
@@ -67,7 +68,6 @@ WSGI_APPLICATION = "main.wsgi.application"
 
 # Database
 # https://docs.djangoproject.com/en/5.1/ref/settings/#databases
-
 
 # Database configuration from environment variables
 DATABASES = {
@@ -116,24 +116,43 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.1/howto/static-files/
 
 STATIC_URL = "static/"
+STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
+
+# Media files (User uploaded files)
+MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
+MEDIA_URL = '/media/'  # Fixed: simplified media URL
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+# ALLOWED_HOSTS - cleaned up duplicates
+ALLOWED_HOSTS = [
+    'localhost',
+    '127.0.0.1',
+    '192.168.1.5',
+    '0.0.0.0',
+    '172.16.32.94',
+    '172.22.176.1',
+    '172.20.43.252',
+    # Add any other IPs you need
+]
 
-# CORS
+# CORS Configuration - cleaned up
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://192.168.1.2:3000",
     "http://127.0.0.1:3000",
-    "http://172.24.0.1:3000", 
-    "http://172.24.0.1:3000", # Add this
+    "http://172.20.43.252:3000",
     # Add your frontend domain here
 ]
+
+# For development, allow all origins
+CORS_ALLOW_ALL_ORIGINS = True
+
 CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_ALL_ORIGINS = DEBUG 
+
 CORS_ALLOWED_HEADERS = [
     'accept',
     'accept-encoding',
@@ -146,31 +165,62 @@ CORS_ALLOWED_HEADERS = [
     'x-requested-with',
 ]
 
-# REST Framework Configuration
+# Allow all HTTP methods for CORS
+CORS_ALLOWED_METHODS = [
+    'DELETE',
+    'GET',
+    'OPTIONS',
+    'PATCH',
+    'POST',
+    'PUT',
+]
+
+# REST Framework Configuration - Modified for public API access
 REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
         'rest_framework.authentication.SessionAuthentication',
     ],
+    # CHANGED: Allow unauthenticated access for development
     'DEFAULT_PERMISSION_CLASSES': [
-        'rest_framework.permissions.IsAuthenticated',
+        'rest_framework.permissions.AllowAny',  # Changed from IsAuthenticated
     ],
     'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
-    'PAGE_SIZE': 20
+    'PAGE_SIZE': 100  # Increased page size for better data loading
 }
+
+# CSRF Configuration for development
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "http://172.20.43.252:3000",
+]
+
+# Disable CSRF for API endpoints in development
+if DEBUG:
+    CSRF_COOKIE_SECURE = False
+    SESSION_COOKIE_SECURE = False
+
 APPEND_SLASH = False
 
-ALLOWED_HOSTS = [
-    'localhost',
-    '127.0.0.1',
-    '192.168.1.5',
-    '0.0.0.0',
-    '172.16.32.94',
-    '172.22.176.1',
-    '172.24.0.1',
-    '172.24.0.1', # Add this for broader access
-    # Add any other IPs you need
-]
-# Media files (User uploaded files)
-MEDIA_ROOT = os.path.join(BASE_DIR, 'media')
-MEDIA_URL = '/DSS_Anas/media/'
+# Logging configuration for debugging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

@@ -68,7 +68,7 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
 
     const fetchsamplingpoint = async () => {
       try {
-        const response = await fetch(`${backendUrl}/rwm/shapefile/`);
+        const response = await fetch(`${backendUrl}/rwm/shapefile/downstream/`);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }
@@ -100,6 +100,8 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
         // Continue without shapefile data - map will still show base layer
       }
     };
+
+
 
 
     const fetchRiverBuffer = async () => {
@@ -157,7 +159,7 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
         riverBufferLayerRef.current = new VectorLayer({
           source: riverBufferSource,
           style: new Style({
-      
+
             stroke: new Stroke({
               color: 'rgba(4, 46, 255, 0.9)', // Darker blue for border
               width: 2,
@@ -175,14 +177,13 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
       }
     };
 
-
     // Initialize map first
     initializeMap();
 
     // Then fetch and add GeoJSON data
     fetchsamplingpoint();
     fetchRiverBuffer();
-    fetchRiver();
+    fetchRiver();;
 
     // Cleanup function
     return () => {

@@ -14,19 +14,19 @@ const nextConfig: NextConfig = {
       },
        {
         source: "/basics/:path*",
-        destination: "http://172.20.43.252:9000/basics/:path*",
+        destination: "http://172.29.192.1:9000/basics/:path*",
       },
       {
         source: "/gwa/:path*",
-        destination: "http://172.20.43.252:9000/gwa/:path*", 
+        destination: "http://172.29.192.1:9000/gwa/:path*", 
       },
       {
         source: "/auth/:path*",
-        destination: "http://172.20.43.252:9000/auth/:path*",
+        destination: "http://172.29.192.1:9000/auth/:path*",
       },
           {
         source: "/rwm/:path*",
-        destination: "http://172.20.43.252:9000/rwm/:path*",
+        destination: "http://172.29.192.1:9000/rwm/:path*",
       },
  
     ]

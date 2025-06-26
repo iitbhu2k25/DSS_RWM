@@ -136,6 +136,7 @@ ALLOWED_HOSTS = [
     '172.16.32.94',
     '172.22.176.1',
     '172.20.43.252',
+    '172.29.192.1'
     # Add any other IPs you need
 ]
 
@@ -145,6 +146,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://192.168.1.2:3000",
     "http://127.0.0.1:3000",
     "http://172.20.43.252:3000",
+    "http://172.29.192.1:3000",
     # Add your frontend domain here
 ]
 
@@ -194,6 +196,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://172.20.43.252:3000",
+    "http://172.29.192.1:3000",
 ]
 
 # Disable CSRF for API endpoints in development

@@ -62,7 +62,7 @@ const Dashboard = () => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`${BACKEND_URL}/rwm/water_quality/`);
+        const response = await fetch(`${BACKEND_URL}/rwm/water_quality/upstream/`);
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }

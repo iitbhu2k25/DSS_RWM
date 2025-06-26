@@ -61,7 +61,7 @@ const Navbar = (): JSX.Element => {
   };
 
   return (
-    <nav 
+    <nav
       ref={navRef}
       className={`${isSticky ? 'bg-orange-300 shadow-md fixed top-0 left-0 w-full z-1000' : 'bg-opacity-10 bg-[#081F5C]'} 
         border-b border-white border-opacity-20 py-4 relative transition-all duration-300 z-1000`}
@@ -88,7 +88,7 @@ const Navbar = (): JSX.Element => {
               <Link href="/dss/home" className="text-white font-semibold text-lg px-5 py-2 inline-block relative hover:translate-y-[-2px] transition-all duration-300 hover:after:w-full after:content-[''] after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-300">
                 Home
               </Link>
-            </li> 
+            </li>
 
             {/* About */}
             <li className="relative group">
@@ -109,7 +109,7 @@ const Navbar = (): JSX.Element => {
               <button
                 onClick={() => toggleDropdown('gwm')}
                 className="text-white font-semibold text-lg px-5 py-2 inline-block relative hover:translate-y-[-2px] transition-all duration-300 hover:after:w-full after:content-[''] after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-300">
-                GWM 
+                GWM
                 <span className="absolute top-[-35px] left-1/2 transform -translate-x-1/2 bg-orange-500 bg-opacity-90 text-white px-3 py-1 rounded-md text-sm whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 after:content-[''] after:absolute after:top-full after:left-1/2 after:ml-[-5px] after:border-[5px] after:border-solid after:border-t-blue-900 after:border-r-transparent after:border-b-transparent after:border-l-transparent">
                   Ground Water Management
                 </span>
@@ -183,7 +183,7 @@ const Navbar = (): JSX.Element => {
                     </li>
                     <li>
                       <Link href="/default" className="block px-4 py-2 text-blue-600 font-semibold hover:bg-blue-50 hover:bg-opacity-10 rounded-md transition duration-200">
-                      Surface Water Assessment
+                        Surface Water Assessment
                       </Link>
                     </li>
                     <li>
@@ -260,11 +260,55 @@ const Navbar = (): JSX.Element => {
                         Water Flow and Storage Estimation
                       </Link>
                     </li>
-                    <li>
-                      <Link href="/dss/RWM/WQA/Ground_based/overall" className="block px-4 py-2 text-blue-600 font-semibold hover:bg-blue-50 hover:bg-opacity-10 rounded-md transition duration-200">
+                    <li className="relative group/submenu">
+                      <div
+                        className="w-full text-left px-4 py-2 text-blue-600 font-semibold hover:bg-blue-50 hover:bg-opacity-10 rounded-md transition duration-200 flex justify-between items-center cursor-pointer"
+                        onClick={(e) => toggleSubmenu(e, 'wqa')}
+                      >
                         Water Quality Assessment
-                      </Link>
+                        <ChevronRight className={`w-4 h-4 ${openDropdowns.wqa ? 'rotate-90' : ''} lg:group-hover/submenu:rotate-90 transition-transform duration-200`} />
+                      </div>
+
+                      <ul className={`${openDropdowns.wqa ? 'block' : 'hidden'} lg:hidden lg:group-hover/submenu:block lg:absolute lg:left-full lg:top-0 lg:bg-white lg:bg-opacity-95 lg:border lg:border-gray-200 lg:border-opacity-10 lg:rounded-lg lg:shadow-lg lg:min-w-[300px] lg:p-3 lg:ml-1 lg:z-50 ml-4`}>
+
+                        {/* Ground Based Assessment */}
+                        <li className="relative group/submenu">
+                          <div
+                            className="w-full text-left px-4 py-2 text-blue-600 font-semibold hover:bg-blue-50 hover:bg-opacity-10 rounded-md transition duration-200 flex justify-between items-center cursor-pointer"
+                            onClick={(e) => toggleSubmenu(e, 'groundBased')}
+                          >
+                            Ground Based Assessment
+                            <ChevronRight className={`w-4 h-4 ${openDropdowns.groundBased ? 'rotate-90' : ''} lg:group-hover/submenu:rotate-90 transition-transform duration-200`} />
+                          </div>
+
+                          <ul className={`${openDropdowns.groundBased ? 'block' : 'hidden'} lg:hidden lg:group-hover/submenu:block lg:absolute lg:left-full lg:top-0 lg:bg-white lg:bg-opacity-95 lg:border lg:border-gray-200 lg:border-opacity-10 lg:rounded-lg lg:shadow-lg lg:min-w-[300px] lg:p-3 lg:ml-1 lg:z-50 ml-4`}>
+                            <li>
+                              <Link href="\dss\RWM\WQA\Ground_based\overall" className="block px-4 py-2 text-blue-600 font-semibold hover:bg-blue-50 hover:bg-opacity-10 rounded-md transition duration-200">
+                                Overall
+                              </Link>
+                            </li>
+                            <li>
+                              <Link href="\dss\RWM\WQA\Ground_based\upstream" className="block px-4 py-2 text-blue-600 font-semibold hover:bg-blue-50 hover:bg-opacity-10 rounded-md transition duration-200">
+                                Upstream
+                              </Link>
+                            </li>
+                            <li>
+                              <Link href="\dss\RWM\WQA\Ground_based\downstream" className="block px-4 py-2 text-blue-600 font-semibold hover:bg-blue-50 hover:bg-opacity-10 rounded-md transition duration-200">
+                                Downstream
+                              </Link>
+                            </li>
+                          </ul>
+                        </li>
+
+                        {/* Satellite Based Assessment */}
+                        <li>
+                          <Link href="/default" className="block px-4 py-2 text-blue-600 font-semibold hover:bg-blue-50 hover:bg-opacity-10 rounded-md transition duration-200">
+                            Satellite Based Assessment
+                          </Link>
+                        </li>
+                      </ul>
                     </li>
+
                     <li>
                       <Link href="/default" className="block px-4 py-2 text-blue-600 font-semibold hover:bg-blue-50 hover:bg-opacity-10 rounded-md transition duration-200">
                         Vulnerability Assessment
@@ -356,7 +400,7 @@ const Navbar = (): JSX.Element => {
                     </li>
                     <li>
                       <Link href="/dss/RWM/WWT/stp_priority" className="block px-4 py-2 text-blue-600 font-semibold hover:bg-blue-50 hover:bg-opacity-10 rounded-md transition duration-200">
-                        STP Priority 
+                        STP Priority
                       </Link>
                     </li>
                     <li>
@@ -379,7 +423,7 @@ const Navbar = (): JSX.Element => {
               <button
                 onClick={() => toggleDropdown('wrm')}
                 className="text-white font-semibold text-lg px-5 py-2 inline-block relative hover:translate-y-[-2px] transition-all duration-300 hover:after:w-full after:content-[''] after:absolute after:bottom-0 after:left-0 after:w-0 after:h-0.5 after:bg-blue-600 after:transition-all after:duration-300">
-                WRM 
+                WRM
                 <span className="absolute top-[-35px] left-1/2 transform -translate-x-1/2 bg-orange-500 bg-opacity-90 text-white px-3 py-1 rounded-md text-sm whitespace-nowrap opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-300 after:content-[''] after:absolute after:top-full after:left-1/2 after:ml-[-5px] after:border-[5px] after:border-solid after:border-t-blue-900 after:border-r-transparent after:border-b-transparent after:border-l-transparent">
                   Water Resource Management
                 </span>
@@ -579,12 +623,12 @@ const Navbar = (): JSX.Element => {
                 Contact
               </Link>
             </li>
-            
-           
+
+
           </ul>
         </div>
-      </div>
-    </nav>
+      </div >
+    </nav >
   );
 };
 

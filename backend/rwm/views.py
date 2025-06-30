@@ -1,3 +1,4 @@
+
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
@@ -13,6 +14,12 @@ import os
 import json
 import logging
 
+import rasterio
+from rasterio.features import rasterize
+from rasterio.transform import from_bounds
+import numpy as np
+from io import BytesIO
+import requests
 logger = logging.getLogger(__name__)
 
 @api_view(['GET','OPTIONS'])
@@ -208,67 +215,327 @@ def River_100m_buffer(request):
     except Exception as e: 
         logger.error(f"Error processing river buffer shapefile: {str(e)}")
         return Response({'error': f'Error processing river buffer shapefile: {str(e)}'}, status=500)
+    
+# def idw_interpolation(points, values, gridx, gridy):
+#     """Perform IDW interpolation."""
+#     coords = np.array(list(zip(points.x, points.y)))
+#     interpolator = NearestNDInterpolator(coords, values)
+#     grid_z = interpolator((gridx, gridy))
+#     return grid_z
 
-# def shapefile_data_upstream(request):
-#     """
-#     API endpoint to return shapefile data as GeoJSON
-#     """
+# def create_raster(gdf, parameter, bounds, output_path, resolution=100):
+#     """Create a GeoTIFF raster for the given parameter."""
+#     xmin, ymin, xmax, ymax = bounds
+#     x = np.linspace(xmin, xmax, resolution)
+#     y = np.linspace(ymin, ymax, resolution)
+#     gridx, gridy = np.meshgrid(x, y)
+    
+#     values = gdf[parameter].values
+#     grid_z = idw_interpolation(gdf.geometry, values, gridx, gridy)
+    
+#     transform = from_bounds(xmin, ymin, xmax, ymax, resolution, resolution)
+#     with rasterio.open(
+#         output_path,
+#         'w',
+#         driver='GTiff',
+#         height=resolution,
+#         width=resolution,
+#         count=1,
+#         dtype=grid_z.dtype,
+#         crs=gdf.crs,
+#         transform=transform
+#     ) as dst:
+#         dst.write(grid_z, 1)
+
+# def publish_to_geoserver(raster_path, layer_name):
+#     """Publish raster to GeoServer using REST API."""
+#     url = f"{settings.GEOSERVER_URL}/rest/workspaces/{settings.GEOSERVER_WORKSPACE}/coveragestores/{settings.GEOSERVER_DATASTORE}/file.geotiff"
+#     headers = {'Content-Type': 'image/tiff'}
+#     auth = (settings.GEOSERVER_USERNAME, settings.GEOSERVER_PASSWORD)
+    
+#     with open(raster_path, 'rb') as f:
+#         response = requests.put(url, data=f, headers=headers, auth=auth)
+#     if response.status_code != 201:
+#         raise Exception(f"Failed to publish {layer_name} to GeoServer: {response.text}")
+
+# def interpolate_parameters(request):
+#     """Django view to perform interpolation and publish to GeoServer."""
 #     try:
-#         # Use proper path construction - avoid raw strings with backslashes
+#         # Read shapefiles
+#         shapefile_path = os.path.join(settings.MEDIA_ROOT, 'rwm_data', 'RIVER_BUFFER100M_SHP')
+#         shapefile_river_full_path = os.path.join(shapefile_path, 'River_buffer_100m.shp')
+        
 #         shp_path = os.path.join(
 #             settings.MEDIA_ROOT, 
 #             'rwm_data', 
-#             'upstream_data_points', 
-#             'upstream_data_points.shp'
+#             'UPDATED_WQA_DATA_points', 
+#             'UPDATED_WQA_DATA_points.shp'
 #         )
+
+
+#         points_gdf = gpd.read_file(settings.shp_path)
+#         buffer_gdf = gpd.read_file(settings.shapefile_river_full_path)
         
-#         # Check if file exists
-#         if not os.path.exists(shp_path):
-#             logger.error(f"Shapefile not found at: {shp_path}")
-#             return JsonResponse({'error': 'Shapefile not found'}, status=404)
+#         # Ensure output directory exists
+#         os.makedirs(settings.RASTER_OUTPUT_PATH, exist_ok=True)
         
-#         # Read shapefile and convert to GeoJSON
-#         gdf = gpd.read_file(shp_path)
+#         # Get bounds from river buffer
+#         bounds = buffer_gdf.total_bounds  # [xmin, ymin, xmax, ymax]
         
-#         # Convert to GeoJSON string, then parse back to dict for JsonResponse
-#         geojson_str = gdf.to_json()
-#         geojson_dict = json.loads(geojson_str)
+#         # Parameters to interpolate
+#         parameters = [
+#             'pH', 'TDS_ppm', 'EC_μS_cm', 'Temperature_°C', 'Turbidity_FNU',
+#             'DO_mg_L', 'ORP', 'TSS_mg_l', 'COD', 'BOD_mg_l', 'Chloride_mg_l',
+#             'Hardness_mg_l', 'Faecal_Coliform_CFU_100mL', 'Total_Coliform_CFU_100mL'
+#         ]
         
-#         return JsonResponse(geojson_dict, safe=False)
+#         # Store layer information
+#         layers = []
+        
+#         # Perform interpolation for each parameter
+#         for param in parameters:
+#             if param in points_gdf.columns:
+#                 output_path = os.path.join(settings.RASTER_OUTPUT_PATH, f"{param}.tif")
+#                 create_raster(points_gdf, param, bounds, output_path)
+#                 layer_name = f"{param}_interpolated"
+#                 publish_to_geoserver(output_path, layer_name)
+#                 layers.append({
+#                     'name': layer_name,
+#                     'wms_url': f"{settings.GEOSERVER_URL}/wms",
+#                     'layer': f"{settings.GEOSERVER_WORKSPACE}:{layer_name}"
+#                 })
+        
+#         # Publish river buffer shapefile to GeoServer
+#         buffer_layer_name = 'river_buffer'
+#         # Note: Assumes river_buffer is already published manually to GeoServer
+#         layers.append({
+#             'name': buffer_layer_name,
+#             'wms_url': f"{settings.GEOSERVER_URL}/wms",
+#             'layer': f"{settings.GEOSERVER_WORKSPACE}:{buffer_layer_name}"
+#         })
+        
+#         return JsonResponse({'status': 'success', 'layers': layers})
     
 #     except Exception as e:
-#         logger.error(f"Error processing shapefile: {str(e)}")
-#         return JsonResponse({'error': 'Failed to process shapefile data'}, status=500)
-    
+#         return JsonResponse({'status': 'error', 'message': str(e)}, status=500)
 
 
-# def shapefile_data_downstream(request):
-#     """
-#     API endpoint to return shapefile data as GeoJSON
-#     """
+
+
+
+# def idw_interpolation(request,data_type):
 #     try:
-#         # Use proper path construction - avoid raw strings with backslashes
-#         shp_path = os.path.join(
-#             settings.MEDIA_ROOT, 
-#             'rwm_data', 
-#             'downstream_data_points', 
-#             'downstream_data_points.shp'
+#         # Load point and river shapefiles
+#         attribute=data_type
+
+#         riverebuffer_path = os.path.join(settings.MEDIA_ROOT, 'rwm_data', 'RIVER_BUFFER100M_SHP')
+#         riverebuffer_full_path = os.path.join(riverebuffer_path, 'River_buffer_100m.shp')
+        
+
+#         point_path = os.path.join(settings.MEDIA_ROOT, 'rwm_data', 'UPDATED_WQA_DATA_points')
+#         pointbuffer_full_path = os.path.join(point_path, 'UPDATED_WQA_DATA_points.shp')
+
+
+
+
+#         point_gdf = gpd.read_file(pointbuffer_full_path)  # Path to point shapefile
+#         river_gdf = gpd.read_file(riverebuffer_full_path)  # Path to river shapefile
+
+#         # Create 100m buffer around river
+#         river_buffer = river_gdf.buffer(100).unary_union
+
+#         # Clip points to buffer
+#         point_gdf = point_gdf[point_gdf.geometry.within(river_buffer)]
+
+#         # Extract coordinates and attribute values
+#         coords = [(geom.x, geom.y) for geom in point_gdf.geometry]
+#         values = point_gdf[attribute].values
+
+#         # Define raster parameters
+#         bounds = river_buffer.bounds
+#         pixel_size = 10  # Adjust resolution as needed
+#         width = int((bounds[2] - bounds[0]) / pixel_size)
+#         height = int((bounds[3] - bounds[1]) / pixel_size)
+#         transform = from_bounds(bounds[0], bounds[1], bounds[2], bounds[3], width, height)
+
+#         # Create an empty raster
+#         raster = np.zeros((height, width), dtype=np.float32)
+
+#         # Perform IDW interpolation
+#         for i in range(height):
+#             for j in range(width):
+#                 x = transform[2] + j * pixel_size
+#                 y = transform[5] - i * pixel_size
+#                 if river_buffer.contains(Point(x, y)):
+#                     weights = [1 / ((x - px) ** 2 + (y - py) ** 2 + 1e-6) for px, py in coords]
+#                     total_weight = sum(weights)
+#                     raster[i, j] = sum(w * v for w, v in zip(weights, values)) / total_weight
+#                 else:
+#                     raster[i, j] = np.nan  # Mask areas outside buffer
+
+#         # Create in-memory raster
+#         memfile = BytesIO()
+#         with rasterio.open(
+#             memfile, 'w', driver='GTiff', height=height, width=width, count=1,
+#             dtype=raster.dtype, crs=point_gdf.crs, transform=transform
+#         ) as dataset:
+#             dataset.write(raster, 1)
+
+#         # Publish to GeoServer via REST API
+#         geoserver_url = "http://geoserver3:8080/geoserver/rest"
+#         workspace = "myworkspace"
+#         store_name = f'{attribute}_raster'
+#         layer_name = f'{attribute}_idw'
+
+#         # Create or update coverage store
+#         headers = {'Content-Type': 'image/tiff', 'Authorization': 'Basic admin:geoserver3'}
+#         requests.put(
+#             f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/file.geotiff',
+#             data=memfile.getvalue(), headers=headers
 #         )
-        
-#         # Check if file exists
-#         if not os.path.exists(shp_path):
-#             logger.error(f"Shapefile not found at: {shp_path}")
-#             return JsonResponse({'error': 'Shapefile not found'}, status=404)
-        
-#         # Read shapefile and convert to GeoJSON
-#         gdf = gpd.read_file(shp_path)
-        
-#         # Convert to GeoJSON string, then parse back to dict for JsonResponse
-#         geojson_str = gdf.to_json()
-#         geojson_dict = json.loads(geojson_str)
-        
-#         return JsonResponse(geojson_dict, safe=False)
-    
+
+#         # Publish layer
+#         coverage_xml = f"""
+#         <coverage>
+#             <name>{layer_name}</name>
+#             <title>{attribute} IDW Interpolation</title>
+#             <srs>EPSG:4326</srs>
+#             <nativeCoverageName>{store_name}</nativeCoverageName>
+#         </coverage>
+#         """
+#         requests.post(
+#             f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/coverages',
+#             data=coverage_xml, headers={'Content-Type': 'text/xml', 'Authorization': 'Basic admin:geoserver3'}
+#         )
+
+#         return JsonResponse({'status': 'success', 'layer_name': layer_name, 'wms_url': f'{geoserver_url}/wms'})
 #     except Exception as e:
-#         logger.error(f"Error processing shapefile: {str(e)}")
-#         return JsonResponse({'error': 'Failed to process shapefile data'}, status=500)
+#         return JsonResponse({'status': 'error', 'message': str(e)})
+
+
+
+
+from urllib.parse import unquote
+
+
+def idw_interpolation(request, attribute):
+    try:
+        # URL decode the attribute parameter
+        decoded_attribute = unquote(attribute)
+        print(f"Original attribute: {attribute}")
+        print(f"Decoded attribute: {decoded_attribute}")
+        
+        # Load point and river shapefiles
+        riverebuffer_path = os.path.join(settings.MEDIA_ROOT, 'rwm_data', 'RIVER_BUFFER100M_SHP')
+        riverebuffer_full_path = os.path.join(riverebuffer_path, 'River_buffer_100m.shp')
+        
+        point_path = os.path.join(settings.MEDIA_ROOT, 'rwm_data', 'UPDATED_WQA_DATA_points')
+        pointbuffer_full_path = os.path.join(point_path, 'UPDATED_WQA_DATA_points.shp')
+
+        point_gdf = gpd.read_file(pointbuffer_full_path)
+        river_gdf = gpd.read_file(riverebuffer_full_path)
+
+        # Debug: Print available columns
+        print(f"Available columns in point shapefile: {list(point_gdf.columns)}")
+        
+        # Check if the decoded attribute exists in the shapefile
+        if decoded_attribute not in point_gdf.columns:
+            return JsonResponse({
+                'status': 'error', 
+                'message': f'Attribute "{decoded_attribute}" not found in shapefile. Available columns: {list(point_gdf.columns)}'
+            })
+
+        # Create 100m buffer around river
+        river_buffer = river_gdf.buffer(100).unary_union
+
+        # Clip points to buffer
+        point_gdf = point_gdf[point_gdf.geometry.within(river_buffer)]
+
+        # Extract coordinates and attribute values
+        coords = [(geom.x, geom.y) for geom in point_gdf.geometry]
+        values = point_gdf[decoded_attribute].values  # Use decoded_attribute here
+
+        # Handle missing/null values
+        valid_indices = ~np.isnan(values.astype(float))
+        coords = [coords[i] for i in range(len(coords)) if valid_indices[i]]
+        values = values[valid_indices]
+
+        if len(coords) == 0:
+            return JsonResponse({
+                'status': 'error',
+                'message': f'No valid data points found for attribute "{decoded_attribute}"'
+            })
+
+        # Define raster parameters
+        bounds = river_buffer.bounds
+        pixel_size = 10  # Adjust resolution as needed
+        width = int((bounds[2] - bounds[0]) / pixel_size)
+        height = int((bounds[3] - bounds[1]) / pixel_size)
+        transform = from_bounds(bounds[0], bounds[1], bounds[2], bounds[3], width, height)
+
+        # Create an empty raster
+        raster = np.zeros((height, width), dtype=np.float32)
+
+        # Perform IDW interpolation
+        for i in range(height):
+            for j in range(width):
+                x = transform[2] + j * pixel_size
+                y = transform[5] - i * pixel_size
+                if river_buffer.contains(Point(x, y)):
+                    weights = [1 / ((x - px) ** 2 + (y - py) ** 2 + 1e-6) for px, py in coords]
+                    total_weight = sum(weights)
+                    raster[i, j] = sum(w * v for w, v in zip(weights, values)) / total_weight
+                else:
+                    raster[i, j] = np.nan  # Mask areas outside buffer
+
+        # Create in-memory raster
+        memfile = BytesIO()
+        with rasterio.open(
+            memfile, 'w', driver='GTiff', height=height, width=width, count=1,
+            dtype=raster.dtype, crs=point_gdf.crs, transform=transform
+        ) as dataset:
+            dataset.write(raster, 1)
+
+        # Publish to GeoServer via REST API
+        geoserver_url = "http://geoserver3:8080/geoserver/rest"
+        workspace = "myworkspace"
+        # Use a safe name for the store/layer (remove special characters)
+        safe_attribute = decoded_attribute.replace('(', '').replace(')', '').replace('/', '_').replace(' ', '_')
+        store_name = f'{safe_attribute}_raster'
+        layer_name = f'{safe_attribute}_idw'
+
+        # Create or update coverage store
+        headers = {'Content-Type': 'image/tiff', 'Authorization': 'Basic admin:geoserver3'}
+        store_response = requests.put(
+            f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/file.geotiff',
+            data=memfile.getvalue(), headers=headers
+        )
+        
+        print(f"Store creation response: {store_response.status_code}")
+
+        # Publish layer
+        coverage_xml = f"""
+        <coverage>
+            <name>{layer_name}</name>
+            <title>{decoded_attribute} IDW Interpolation</title>
+            <srs>EPSG:4326</srs>
+            <nativeCoverageName>{store_name}</nativeCoverageName>
+        </coverage>
+        """
+        coverage_response = requests.post(
+            f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/coverages',
+            data=coverage_xml, headers={'Content-Type': 'text/xml', 'Authorization': 'Basic admin:geoserver3'}
+        )
+        
+        print(f"Coverage creation response: {coverage_response.status_code}")
+
+        return JsonResponse({
+            'status': 'success', 
+            'layer_name': layer_name, 
+            'wms_url': f'http://geoserver3:8080/geoserver/wms',
+            'layer': f'{workspace}:{layer_name}'
+        })
+        
+    except Exception as e:
+        print(f"Error in IDW interpolation: {str(e)}")
+        return JsonResponse({'status': 'error', 'message': str(e)})

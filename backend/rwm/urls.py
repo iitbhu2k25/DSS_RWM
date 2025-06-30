@@ -10,4 +10,5 @@ urlpatterns = [
     path('shapefile_filtered/<str:data_type>/', views.shapefile_data_filtered, name='shapefile_data_filtered_typed'),
     path('river_100m_buffer/', views.River_100m_buffer, name='river_100m_buffer'),
     path('river/', views.River, name='river'),
+     path('interpolate/<str:data_type>/', views.idw_interpolation, name='idw_interpolation'),
 ]

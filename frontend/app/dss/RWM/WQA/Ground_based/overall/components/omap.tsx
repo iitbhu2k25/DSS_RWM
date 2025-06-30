@@ -1,5 +1,5 @@
 'use client';
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import 'ol/ol.css';
 import Map from 'ol/Map';
 import View from 'ol/View';
@@ -8,14 +8,45 @@ import VectorLayer from 'ol/layer/Vector';
 import VectorSource from 'ol/source/Vector';
 import OSM from 'ol/source/OSM';
 import GeoJSON from 'ol/format/GeoJSON';
+import TileWMS from 'ol/source/TileWMS';
 import { Style, Circle, Fill, Stroke } from 'ol/style';
-import { fromLonLat } from 'ol/proj';
+import { fromLonLat, transformExtent } from 'ol/proj';
 
 interface WaterQualityData {
   sampling?: string;
   latitude?: number;
   longitude?: number;
   [key: string]: any;
+}
+
+interface SamplingPointData {
+  'Sampling Location'?: string;
+  'STATUS'?: string;
+  'LATITUDE'?: number;
+  'LONGITUDE'?: number;
+  'pH'?: number;
+  'TDS (ppm)'?: number;
+  'EC (μS/cm)'?: number;
+  'Temperature (°C)'?: number;
+  'Turbidity (FNU)'?: number;
+  'DO (mg/L)'?: number;
+  'ORP'?: number;
+  'TSS(mg/l)'?: number;
+  'COD'?: number;
+  'BOD(mg/l)'?: number;
+  'TS_mg_l_'?: number;
+  'Chloride(mg/l)'?: number;
+  'Nitrate'?: number;
+  'Hardness(mg/l)'?: number;
+  'Faecal Coliform (CFU/100 mL)'?: number;
+  'Total Coliform (CFU/100 mL)'?: number;
+  [key: string]: any;
+}
+
+interface LayerInfo {
+  name: string;
+  wms_url: string;
+  layer: string;
 }
 
 interface MapComponentProps {
@@ -28,17 +59,27 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
   const mapInstanceRef = useRef<Map | null>(null);
   const vectorLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const riverBufferLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const riverLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const wmsLayerRef = useRef<TileLayer<TileWMS> | null>(null);
+  const [selectedPoint, setSelectedPoint] = useState<SamplingPointData | null>(null);
+  const [showPanel, setShowPanel] = useState(false);
+  const [layers, setLayers] = useState<LayerInfo[]>([]);
+  const [selectedLayer, setSelectedLayer] = useState<string>('');
+
+  const attributes = [
+    'pH', 'TDS (ppm)', 'EC (μS/cm)', 'Temperature (°C)', 'Turbidity (FNU)', 'DO (mg/L)', 'ORP',
+    'TSS(mg/l)', 'COD', 'BOD(mg/l)', 'TS_mg_l_', 'Chloride(mg/l)', 'Nitrate', 'Hardness(mg/l)',
+    'Faecal Coliform (CFU/100 mL)', 'Total Coliform (CFU/100 mL)'
+  ];
 
   useEffect(() => {
     if (!csvData.length || !mapRef.current) return;
 
     const initializeMap = () => {
-      // Clean up existing map
       if (mapInstanceRef.current) {
         mapInstanceRef.current.setTarget(undefined);
       }
 
-      // Create initial map without vector layer
       const map = new Map({
         target: mapRef.current!,
         layers: [
@@ -47,31 +88,36 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
           }),
         ],
         view: new View({
-          center: fromLonLat([
-            csvData[0]?.longitude || 77.2090,
-            csvData[0]?.latitude || 28.6139
-          ]), // Default to Delhi coordinates
+          center: fromLonLat([csvData[0]?.longitude || 77.2090, csvData[0]?.latitude || 28.6139]),
           zoom: 10,
+          projection: 'EPSG:3857',
         }),
       });
 
       mapInstanceRef.current = map;
 
-      // Add click handler
       map.on('click', (event) => {
+        let featureFound = false;
         map.forEachFeatureAtPixel(event.pixel, (feature) => {
           const properties = feature.getProperties();
-          alert(JSON.stringify(properties, null, 2));
+          if (properties['Sampling Location'] || properties['LATITUDE']) {
+            setSelectedPoint(properties as SamplingPointData);
+            setShowPanel(true);
+            featureFound = true;
+            return true;
+          }
         });
+        if (!featureFound) {
+          setShowPanel(false);
+          setSelectedPoint(null);
+        }
       });
     };
 
-    const fetchsamplingpoint = async () => {
+    const fetchSamplingPoints = async () => {
       try {
         const response = await fetch(`${backendUrl}/rwm/shapefile/`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const geojsonData = await response.json();
 
         const vectorSource = new VectorSource({
@@ -84,30 +130,25 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
           source: vectorSource,
           style: new Style({
             image: new Circle({
-              radius: 6,
-              fill: new Fill({ color: 'red' }),
-              stroke: new Stroke({ color: 'black', width: 1 }),
+              radius: 8,
+              fill: new Fill({ color: 'rgba(255, 0, 0, 0.8)' }),
+              stroke: new Stroke({ color: 'darkred', width: 2 }),
             }),
           }),
         });
 
-        // Add vector layer to map
         if (mapInstanceRef.current) {
           mapInstanceRef.current.addLayer(vectorLayerRef.current);
         }
       } catch (error) {
-        console.error('Error fetching GeoJSON:', error);
-        // Continue without shapefile data - map will still show base layer
+        console.error('Error fetching sampling points GeoJSON:', error);
       }
     };
-
 
     const fetchRiverBuffer = async () => {
       try {
         const response = await fetch(`${backendUrl}/rwm/river_100m_buffer/`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
         const riverBufferData = await response.json();
 
         const riverBufferSource = new VectorSource({
@@ -119,83 +160,214 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
         riverBufferLayerRef.current = new VectorLayer({
           source: riverBufferSource,
           style: new Style({
-            // fill: new Fill({
-            //   color: 'rgba(0, 100, 255, 0.3)', // Semi-transparent blue for buffer
-            // }),
             stroke: new Stroke({
-              color: 'rgb(255, 234, 0)', // Darker yellow for border
-              width: 1,
-            }),
-          }),
-        });
+              color: 'rgb(255, 234, 0)',
+              width: 4
+            }), }),
+          });
 
-        // Add river buffer layer to map
-        if (mapInstanceRef.current) {
+          if(mapInstanceRef.current) {
           mapInstanceRef.current.addLayer(riverBufferLayerRef.current);
+          const extent = riverBufferSource.getExtent();
+          if (!extent.includes(Infinity) && !extent.includes(-Infinity)) {
+            mapInstanceRef.current.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 1000 });
+          }
         }
       } catch (error) {
         console.error('Error fetching river buffer GeoJSON:', error);
-        // Continue without river buffer data
       }
     };
-
 
     const fetchRiver = async () => {
       try {
         const response = await fetch(`${backendUrl}/rwm/river/`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const riverBufferData = await response.json();
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const riverData = await response.json();
 
-        const riverBufferSource = new VectorSource({
-          features: new GeoJSON().readFeatures(riverBufferData, {
+        const riverSource = new VectorSource({
+          features: new GeoJSON().readFeatures(riverData, {
             featureProjection: 'EPSG:3857',
           }),
         });
 
-        riverBufferLayerRef.current = new VectorLayer({
-          source: riverBufferSource,
+        riverLayerRef.current = new VectorLayer({
+          source: riverSource,
           style: new Style({
-      
             stroke: new Stroke({
-              color: 'rgba(4, 46, 255, 0.9)', // Darker blue for border
+              color: 'rgba(4, 46, 255, 0.9)',
               width: 2,
             }),
           }),
         });
 
-        // Add river buffer layer to map
         if (mapInstanceRef.current) {
-          mapInstanceRef.current.addLayer(riverBufferLayerRef.current);
+          mapInstanceRef.current.addLayer(riverLayerRef.current);
         }
       } catch (error) {
-        console.error('Error fetching river buffer GeoJSON:', error);
-        // Continue without river buffer data
+        console.error('Error fetching river GeoJSON:', error);
       }
     };
 
-
-    // Initialize map first
     initializeMap();
-
-    // Then fetch and add GeoJSON data
-    fetchsamplingpoint();
+    fetchSamplingPoints();
     fetchRiverBuffer();
     fetchRiver();
 
-    // Cleanup function
     return () => {
       if (mapInstanceRef.current) {
         mapInstanceRef.current.setTarget(undefined);
         mapInstanceRef.current = null;
       }
     };
-  }, [csvData]);
+  }, [csvData, backendUrl]);
+
+  useEffect(() => {
+    if (!mapInstanceRef.current || !selectedLayer) return;
+
+    // Remove existing WMS layer
+    if (wmsLayerRef.current) {
+      mapInstanceRef.current.removeLayer(wmsLayerRef.current);
+      wmsLayerRef.current = null;
+    }
+
+    // Trigger interpolation and add new WMS layer
+    const fetchInterpolatedLayer = async () => {
+      try {
+        const response = await fetch(`${backendUrl}/interpolate/${encodeURIComponent(selectedLayer)}/`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const data = await response.json();
+        if (data.status === 'success') {
+          const wmsLayer = new TileLayer({
+            source: new TileWMS({
+              url: data.wms_url,
+              params: { LAYERS: data.layer, TILED: true },
+              serverType: 'geoserver',
+            }),
+            opacity: 0.7,
+          });
+          wmsLayerRef.current = wmsLayer;
+          mapInstanceRef.current?.addLayer(wmsLayer);
+          setLayers((prev) => {
+            if (!prev.some((l) => l.name === selectedLayer)) {
+              return [...prev, { name: selectedLayer, wms_url: data.wms_url, layer: data.layer }];
+            }
+            return prev;
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching interpolated layer:', error);
+      }
+    };
+
+    if (selectedLayer) {
+      fetchInterpolatedLayer();
+    }
+  }, [selectedLayer, backendUrl]);
+
+  const formatValue = (value: any): string => {
+    if (value === null || value === undefined || value === '') {
+      return 'N/A';
+    }
+    if (typeof value === 'number') {
+      return value.toFixed(2);
+    }
+    return String(value);
+  };
+
+  const getParameterCategory = (key: string): string => {
+    const physicalParams = ['Temperature (°C)', 'Turbidity (FNU)', 'TDS (ppm)', 'TSS(mg/l)', 'TS_mg_l_'];
+    const chemicalParams = ['pH', 'DO (mg/L)', 'ORP', 'EC (μS/cm)', 'COD', 'BOD(mg/l)', 'Chloride(mg/l)', 'Nitrate', 'Hardness(mg/l)'];
+    const biologicalParams = ['Faecal Coliform (CFU/100 mL)', 'Total Coliform (CFU/100 mL)'];
+    if (physicalParams.includes(key)) return 'Physical Parameters';
+    if (chemicalParams.includes(key)) return 'Chemical Parameters';
+    if (biologicalParams.includes(key)) return 'Biological Parameters';
+    return 'General Information';
+  };
+
+  const renderParametersByCategory = () => {
+    if (!selectedPoint) return null;
+
+    const categories: { [key: string]: Array<[string, any]> } = {
+      'General Information': [],
+      'Physical Parameters': [],
+      'Chemical Parameters': [],
+      'Biological Parameters': [],
+    };
+
+    Object.entries(selectedPoint).forEach(([key, value]) => {
+      if (key === 'geometry') return;
+      const category = getParameterCategory(key);
+      categories[category].push([key, value]);
+    });
+
+    return Object.entries(categories).map(([category, params]) => {
+      if (params.length === 0) return null;
+      return (
+        <div key={category} className="mb-4">
+          <h4 className="font-semibold text-blue-700 mb-2 border-b border-blue-200 pb-1">
+            {category}
+          </h4>
+          <div className="grid grid-cols-1 gap-2">
+            {params.map(([key, value]) => (
+              <div key={key} className="flex justify-between items-center py-1 px-2 hover:bg-gray-50 rounded">
+                <span className="text-sm font-medium text-gray-700">{key}:</span>
+                <span className="text-sm text-gray-900 font-mono">{formatValue(value)}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      );
+    });
+  };
 
   return (
-    <div className="h-full w-full">
+    <div className="h-full w-full relative">
+      <div className="absolute top-4 left-4 z-10">
+        <select
+          value={selectedLayer}
+          onChange={(e) => setSelectedLayer(e.target.value)}
+          className="p-2 border rounded bg-white shadow-md"
+        >
+          <option value="">Select Parameter</option>
+          {attributes.map((attr) => (
+            <option key={attr} value={attr}>
+              {attr}
+            </option>
+          ))}
+        </select>
+      </div>
       <div ref={mapRef} className="h-full w-full" />
+      {showPanel && selectedPoint && (
+        <div className="absolute top-4 right-4 bg-white rounded-lg shadow-lg border max-w-sm max-h-96 overflow-y-auto z-10">
+          <div className="p-4">
+            <div className="flex justify-between items-center mb-3">
+              <h3 className="text-lg font-bold text-gray-800">Sampling Point Details</h3>
+              <button
+                onClick={() => setShowPanel(false)}
+                className="text-gray-500 hover:text-gray-700 font-bold text-xl"
+              >
+                ×
+              </button>
+            </div>
+            {selectedPoint['Sampling Location'] && (
+              <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+                <h4 className="font-semibold text-blue-800">{selectedPoint['Sampling Location']}</h4>
+                {selectedPoint['STATUS'] && (
+                  <span
+                    className={`inline-block mt-1 px-2 py-1 rounded text-xs font-medium ${selectedPoint['STATUS']?.toString().toLowerCase() === 'active'
+                        ? 'bg-green-100 text-green-800'
+                        : 'bg-red-100 text-red-800'
+                      }`}
+                  >
+                    {selectedPoint['STATUS']}
+                  </span>
+                )}
+              </div>
+            )}
+            <div className="space-y-2">{renderParametersByCategory()}</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

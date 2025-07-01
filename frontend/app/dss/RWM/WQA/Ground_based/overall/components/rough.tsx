@@ -28,8 +28,8 @@ interface WaterQualityData {
   hardness?: string | number;
   faecal_coliform?: string | number;
   total_coliform?: string | number;
-  subdistrict_code?: string | number; // Added subdistrict code field
 }
+
 
 interface LocationItem {
   id: number;
@@ -42,12 +42,17 @@ interface District extends LocationItem {
 
 interface SubDistrict extends LocationItem {
   districtId: number;
-  districtName: string;
+  districtName: string;// Added for sorting/grouping
 }
+
+
+
+
+
+
 
 const Dashboard = () => {
   const [csvData, setCsvData] = useState<WaterQualityData[]>([]);
-  const [filteredData, setFilteredData] = useState<WaterQualityData[]>([]);
   const [selectedAttribute, setSelectedAttribute] = useState<string>('ph');
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -84,7 +89,9 @@ const Dashboard = () => {
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://172.29.192.1:9000';
 
-  // Fetch states
+
+
+
   useEffect(() => {
     const fetchStates = async (): Promise<void> => {
       try {
@@ -153,8 +160,10 @@ const Dashboard = () => {
     // Reset dependent dropdowns
     setSubDistricts([]);
     setSelectedSubDistricts([]);
+
   }, [selectedState]);
 
+  // Fetch sub-districts when districts change
   // Fetch sub-districts when districts change
   useEffect(() => {
     if (selectedDistricts.length > 0) {
@@ -207,9 +216,28 @@ const Dashboard = () => {
       setSubDistricts([]);
       setSelectedSubDistricts([]);
     }
+    // Reset dependent dropdowns
+
   }, [selectedDistricts, districts]);
 
-  // Fetch all water quality data on component mount
+ const handleStateChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
+    if (!selectionsLocked) {
+      const stateCode = e.target.value;
+      setSelectedState(stateCode);
+
+      // Notify parent component about the state change
+      if (onStateChange) {
+        onStateChange(stateCode);
+      }
+    }
+  };
+
+
+
+
+
+
+
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -220,7 +248,6 @@ const Dashboard = () => {
         }
         const data = await response.json();
         setCsvData(data);
-        setFilteredData(data); // Initially show all data
         setError(null);
       } catch (error) {
         console.error('Error fetching data:', error);
@@ -232,40 +259,6 @@ const Dashboard = () => {
     fetchData();
   }, []);
 
-  // Filter data based on selected subdistricts
-  useEffect(() => {
-    if (selectedSubDistricts.length > 0) {
-      const filtered = csvData.filter(row => {
-        const rowSubdistrictCode = row.subdistrict_code?.toString();
-        return rowSubdistrictCode && selectedSubDistricts.includes(rowSubdistrictCode);
-      });
-      setFilteredData(filtered);
-    } else {
-      setFilteredData(csvData); // Show all data if no subdistrict is selected
-    }
-  }, [selectedSubDistricts, csvData]);
-
-  // Event handlers
-  const handleStateChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
-    const stateCode = e.target.value;
-    setSelectedState(stateCode);
-    // Reset dependent selections
-    setSelectedDistricts([]);
-    setSelectedSubDistricts([]);
-  };
-
-  const handleDistrictChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
-    const districtIds = Array.from(e.target.selectedOptions, option => option.value);
-    setSelectedDistricts(districtIds);
-    // Reset dependent selections
-    setSelectedSubDistricts([]);
-  };
-
-  const handleSubDistrictChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
-    const subDistrictIds = Array.from(e.target.selectedOptions, option => option.value);
-    setSelectedSubDistricts(subDistrictIds);
-  };
-
   const parseValue = (value: string | number | null | undefined): number => {
     if (value === null || value === undefined || value === '') return 0;
     if (typeof value === 'string') {
@@ -275,68 +268,169 @@ const Dashboard = () => {
     return parseFloat(value.toString()) || 0;
   };
 
+  // Group data by base sampling location and type (Drain, Upstream, Downstream)
+  const groupDataByLocation = () => {
+    const grouped: { [key: string]: WaterQualityData[] } = {};
+    csvData.forEach((row) => {
+      if (!row.sampling || !row.location) return;
+      const locationKey = row.sampling || 'Unknown';
+      if (!grouped[locationKey]) {
+        grouped[locationKey] = [];
+      }
+      grouped[locationKey].push(row);
+    });
+    return grouped;
+  };
+
+  const groupedData = groupDataByLocation();
+
   // Define colors for each type
   const typeColors: Record<string, string> = {
     Drain: 'rgba(255, 99, 132, 0.6)', // Red
     Upstream: 'rgba(54, 162, 235, 0.6)', // Blue
     Downstream: 'rgba(75, 192, 192, 0.6)', // Teal
     'Below Bridge': 'rgba(255, 206, 86, 0.6)', // Yellow
+    // 'Below Bridge': 'rgba(255, 206, 86, 0.6)', // Yellow
+    // 'Geetanagar Hukalganj Opposite of dehlwariya': 'rgba(153, 102, 255, 0.6)', // Purple
   };
 
   const borderColors: Record<string, string> = {
     Drain: 'rgba(255, 99, 132, 1)',
     Upstream: 'rgba(54, 162, 235, 1)',
     Downstream: 'rgba(75, 192, 192, 1)',
-    'Below Bridge': 'rgba(255, 206, 86, 1)',
+    'Below Bridge': 'rgba(255, 206, 86, 0.6)', // Yellow
+    // 'Below Bridge': 'rgba(255, 206, 86, 1)',
+    // 'Geetanagar Hukalganj Opposite of dehlwariya': 'rgba(153, 102, 255, 1)',
   };
 
-  const createChartDataWithCustomSpacing = (spacingWidth = 2) => {
-    // Group data by sampling location using filtered data
-    const groupedBySampling = filteredData.reduce((acc, row) => {
-      const sampling = row.sampling || 'Unknown';
-      if (!acc[sampling]) {
-        acc[sampling] = [];
+  // Prepare chart data with grouped labels and datasets
+  // const chartData = {
+  //   labels: csvData.map((row) => row.sampling || 'Unknown'),
+  //   datasets: Object.keys(typeColors).map((type) => ({
+  //     label: type,
+  //     data: Object.keys(groupedData).flatMap((location) => {
+  //       const values = groupedData[location].map((row) => {
+  //         if (!typeColors[row.location!]) {
+  //           console.warn(`No color defined for location type: ${row.location}`);
+  //         }
+  //         return row.location === type ? parseValue(row[selectedAttribute as keyof WaterQualityData]) : null;
+  //       });
+  //       return [...values, 0];
+  //     }),
+  //     backgroundColor: typeColors[type],
+  //     borderColor: borderColors[type],
+  //     borderWidth: 2,
+  //     barPercentage: 0.6,
+  //     categoryPercentage: 0.9,
+  //     skipNull: true, // Skip null values to avoid rendering empty bars
+  //   })),
+  // };
+
+
+
+//   const createGroupedChartData = () => {
+//   // Get unique sampling locations
+//   const uniqueSamplingLocations = [...new Set(csvData.map(row => row.sampling))].filter(Boolean);
+  
+//   return {
+//     labels: uniqueSamplingLocations,
+//     datasets: Object.keys(typeColors).map((type) => ({
+//       label: type,
+//       data: uniqueSamplingLocations.map(samplingLocation => {
+//         // Find the row that matches both sampling location and type
+//         const matchingRow = csvData.find(row => 
+//           row.sampling === samplingLocation && row.location === type
+//         );
+//         return matchingRow ? parseValue(matchingRow[selectedAttribute as keyof WaterQualityData]) : null;
+//       }),
+//       backgroundColor: typeColors[type],
+//       borderColor: borderColors[type],
+//       borderWidth: 2,
+//       barPercentage: 0.6,
+//       categoryPercentage: 1,
+//       skipNull: true,
+//     })),
+//   };
+// };
+
+// // Then use it like:
+// const chartData = createGroupedChartData();
+
+
+const createChartDataWithCustomSpacing = (spacingWidth = 2) => {
+  // Group data by sampling location
+  const groupedBySampling = csvData.reduce((acc, row) => {
+    const sampling = row.sampling || 'Unknown';
+    if (!acc[sampling]) {
+      acc[sampling] = [];
+    }
+    acc[sampling].push(row);
+    return acc;
+  }, {} as Record<string, WaterQualityData[]>);
+
+  const samplingLocations = Object.keys(groupedBySampling);
+  const labels: string[] = [];
+  
+  // Create labels with custom spacing
+  samplingLocations.forEach((sampling, index) => {
+    labels.push(sampling);
+    // Add multiple empty labels for wider spacing (except after the last group)
+    if (index < samplingLocations.length - 1) {
+      for (let i = 0; i < spacingWidth; i++) {
+        labels.push('');
       }
-      acc[sampling].push(row);
-      return acc;
-    }, {} as Record<string, WaterQualityData[]>);
+    }
+  });
 
-    const samplingLocations = Object.keys(groupedBySampling);
-    const labels: string[] = [];
-    
-    // Create labels with custom spacing
-    samplingLocations.forEach((sampling, index) => {
-      labels.push(sampling);
-      // Add multiple empty labels for wider spacing (except after the last group)
-      if (index < samplingLocations.length - 1) {
-        for (let i = 0; i < spacingWidth; i++) {
-          labels.push('');
-        }
-      }
-    });
+  // Create datasets
+  const datasets = Object.keys(typeColors).map((type) => ({
+    label: type,
+    data: labels.map(label => {
+      if (label === '') return null; // No data for spacing labels
+      
+      const matchingRow = groupedBySampling[label]?.find(row => row.location === type);
+      return matchingRow ? parseValue(matchingRow[selectedAttribute as keyof WaterQualityData]) : null;
+    }),
+    backgroundColor: typeColors[type],
+    borderColor: borderColors[type],
+    borderWidth: 2,
+    barPercentage: 0.8,
+    categoryPercentage: 0.9,
+    skipNull: true,
+  }));
 
-    // Create datasets
-    const datasets = Object.keys(typeColors).map((type) => ({
-      label: type,
-      data: labels.map(label => {
-        if (label === '') return null; // No data for spacing labels
-        
-        const matchingRow = groupedBySampling[label]?.find(row => row.location === type);
-        return matchingRow ? parseValue(matchingRow[selectedAttribute as keyof WaterQualityData]) : null;
-      }),
-      backgroundColor: typeColors[type],
-      borderColor: borderColors[type],
-      borderWidth: 2,
-      barPercentage: 0.8,
-      categoryPercentage: 0.9,
-      skipNull: true,
-    }));
+  return { labels, datasets };
+};
 
-    return { labels, datasets };
-  };
+// Usage:
+const chartData = createChartDataWithCustomSpacing(0); 
 
-  // Usage:
-  const chartData = createChartDataWithCustomSpacing(0);
+
+
+
+
+
+
+  // const chartData = {
+  //   labels: csvData.map((row) => row.sampling || 'Unknown'),
+  //   datasets: Object.keys(typeColors).map((type) => ({
+  //     label: type,
+  //     data: csvData.map((row) => {
+  //       // Return the value if this row matches the current type, otherwise null
+  //       return row.location === type ? parseValue(row[selectedAttribute as keyof WaterQualityData]) : null;
+  //     }),
+  //     backgroundColor: typeColors[type],
+  //     borderColor: borderColors[type],
+  //     borderWidth: 2,
+  //     barPercentage: 0.6,
+  //     categoryPercentage: 0.9,
+  //     skipNull: true,
+  //   })),
+  // };
+
+
+
+
 
   const chartOptions = {
     responsive: true,
@@ -356,6 +450,15 @@ const Dashboard = () => {
         },
       },
     },
+    // annotation: {
+    //   annotations: Object.keys(groupedData).map((location, index) => ({
+    //     type: 'box',
+    //     xMin: index * (groupedData[location].length + 1) - 0.5,
+    //     xMax: (index + 1) * (groupedData[location].length + 1) - 0.5,
+    //     backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    //     borderWidth: 0,
+    //   })),
+    // },
   };
 
   if (loading) {
@@ -377,107 +480,23 @@ const Dashboard = () => {
   return (
     <div className="flex h-screen">
       <div className="w-full p-4 overflow-y-auto">
-        {/* Location Selection Dropdowns */}
-        <div className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
-          {/* State Dropdown */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              State
-            </label>
-            <select
-              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              value={selectedState}
-              onChange={handleStateChange}
-            >
-              <option value="">Select State</option>
-              {states.map((state) => (
-                <option key={state.id} value={state.id}>
-                  {state.name}
-                </option>
-              ))}
-            </select>
-          </div>
 
-          {/* District Dropdown */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              District
-            </label>
-            <select
-              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              // multiple
-              // size={4}
-              value={selectedDistricts}
-              onChange={handleDistrictChange}
-              disabled={!selectedState}
-            >
-              {districts.map((district) => (
-                <option key={district.id} value={district.id}>
-                  {district.name}
-                </option>
-              ))}
-            </select>
-            <small className="text-gray-500">Hold Ctrl/Cmd to select multiple</small>
-          </div>
-
-          {/* Sub-District Dropdown */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Sub-District
-            </label>
-            <select
-              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              // multiple
-              // size={4}
-              value={selectedSubDistricts}
-              onChange={handleSubDistrictChange}
-              disabled={selectedDistricts.length === 0}
-            >
-              {subDistricts.map((subDistrict) => (
-                <option key={subDistrict.id} value={subDistrict.id}>
-                  {subDistrict.name} ({subDistrict.districtName})
-                </option>
-              ))}
-            </select>
-            <small className="text-gray-500">Hold Ctrl/Cmd to select multiple</small>
-          </div>
-
-          {/* Attribute Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Water Quality Parameter
-            </label>
-            <select
-              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              value={selectedAttribute}
-              onChange={(e) => setSelectedAttribute(e.target.value)}
-            >
-              {attributes.map((attr) => (
-                <option key={attr} value={attr}>
-                  {attributeLabels[attr]}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {/* Data Summary */}
-        <div className="mb-4 p-3 bg-gray-100 rounded-md">
-          <p className="text-sm text-gray-700">
-            Showing data for: {filteredData.length} records
-            {selectedSubDistricts.length > 0 && (
-              <span className="ml-2 text-blue-600">
-                (Filtered by {selectedSubDistricts.length} sub-district{selectedSubDistricts.length > 1 ? 's' : ''})
-              </span>
-            )}
-          </p>
-        </div>
-
-        {/* Chart */}
-        <div className="h-96 w-1000">
+        <select
+          className="mb-4 p-2 border rounded"
+          value={selectedAttribute}
+          onChange={(e) => setSelectedAttribute(e.target.value)}
+        >
+          {attributes.map((attr) => (
+            <option key={attr} value={attr}>
+              {attributeLabels[attr]}
+            </option>
+          ))}
+        </select>
+        <div className="h-180 w-2000">
           <Bar data={chartData} options={chartOptions} />
         </div>
       </div>
+
     </div>
   );
 };

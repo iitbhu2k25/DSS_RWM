@@ -7,6 +7,8 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework import status
+import pandas as pd
+from shapely.geometry import Point 
 
 from .models import WaterQuality_overall, WaterQuality_upstream, WaterQuality_downstream    
 import geopandas as gpd
@@ -21,6 +23,12 @@ import numpy as np
 from io import BytesIO
 import requests
 logger = logging.getLogger(__name__)
+import base64
+from scipy.spatial.distance import cdist
+from scipy.interpolate import griddata
+import numpy as np
+import geopandas as gpd
+
 
 @api_view(['GET','OPTIONS'])
 @permission_classes([AllowAny])
@@ -413,129 +421,434 @@ def River_100m_buffer(request):
 #         return JsonResponse({'status': 'error', 'message': str(e)})
 
 
+@csrf_exempt
+def clipped_subdistrict(request):
+    """
+    API endpoint to return filtered shapefile data as GeoJSON
+    """
+    try:
+        
+        shp_path = os.path.join(
+            settings.MEDIA_ROOT, 
+            'rwm_data', 
+            'clipped_subdist', 
+            'clipped_subdist.shp'
+       
+         )
+        if not os.path.exists(shp_path):
+            return JsonResponse({'error': 'Shapefile not found'}, status=404)
+        
+        # Read shapefile
+        gdf = gpd.read_file(shp_path)
+        
+        # Optional: Filter or process the data
+        # Example: Only include features with specific attributes
+        # gdf = gdf[gdf['some_column'].notna()]
+        
+        # Ensure the CRS is WGS84 for web mapping
+        if gdf.crs != 'EPSG:4326':
+            gdf = gdf.to_crs('EPSG:4326')
+        
+        geojson_str = gdf.to_json()
+        geojson_dict = json.loads(geojson_str)
+        
+        return JsonResponse(geojson_dict, safe=False)
+    
+    except Exception as e:
+        logger.error(f"Error processing filtered shapefile: {str(e)}")
+        return JsonResponse({'error': 'Failed to process shapefile data'}, status=500)
+    
 
+
+
+
+
+
+
+
+
+# from urllib.parse import unquote
+
+# def idw_interpolation(request, attribute):
+#     try:
+#         # URL decode the attribute parameter
+#         decoded_attribute = unquote(attribute)
+#         print(f"Original attribute: {attribute}")
+#         print(f"Decoded attribute: {decoded_attribute}")
+        
+#         # Load point and river shapefiles
+#         riverebuffer_path = os.path.join(settings.MEDIA_ROOT, 'rwm_data', 'RIVER_BUFFER100M_SHP')
+#         riverebuffer_full_path = os.path.join(riverebuffer_path, 'River_buffer_100m.shp')
+        
+#         point_path = os.path.join(settings.MEDIA_ROOT, 'rwm_data', 'UPDATED_WQA_DATA_points')
+#         pointbuffer_full_path = os.path.join(point_path, 'UPDATED_WQA_DATA_points.shp')
+
+#         point_gdf = gpd.read_file(pointbuffer_full_path)
+#         river_gdf = gpd.read_file(riverebuffer_full_path)
+
+#         # Debug: Print available columns
+#         print(f"Available columns in point shapefile: {list(point_gdf.columns)}")
+        
+#         # Check if the decoded attribute exists in the shapefile
+#         if decoded_attribute not in point_gdf.columns:
+#             return JsonResponse({
+#                 'status': 'error', 
+#                 'message': f'Attribute "{decoded_attribute}" not found in shapefile. Available columns: {list(point_gdf.columns)}'
+#             })
+
+#         # Create 100m buffer around river
+#         river_buffer = river_gdf.buffer(100).unary_union
+
+#         # Clip points to buffer
+#         point_gdf = point_gdf[point_gdf.geometry.within(river_buffer)]
+
+#         # Extract coordinates and attribute values
+#         coords = [(geom.x, geom.y) for geom in point_gdf.geometry]
+#         values = point_gdf[decoded_attribute].values  # Use decoded_attribute here
+
+#         # Handle missing/null values
+#         valid_indices = ~np.isnan(values.astype(float))
+#         coords = [coords[i] for i in range(len(coords)) if valid_indices[i]]
+#         values = values[valid_indices]
+
+#         if len(coords) == 0:
+#             return JsonResponse({
+#                 'status': 'error',
+#                 'message': f'No valid data points found for attribute "{decoded_attribute}"'
+#             })
+
+#         # Define raster parameters
+#         bounds = river_buffer.bounds
+#         pixel_size = 10  # Adjust resolution as needed
+#         width = int((bounds[2] - bounds[0]) / pixel_size)
+#         height = int((bounds[3] - bounds[1]) / pixel_size)
+#         transform = from_bounds(bounds[0], bounds[1], bounds[2], bounds[3], width, height)
+
+#         # Create an empty raster
+#         raster = np.zeros((height, width), dtype=np.float32)
+
+#         # Perform IDW interpolation
+#         for i in range(height):
+#             for j in range(width):
+#                 x = transform[2] + j * pixel_size
+#                 y = transform[5] - i * pixel_size
+#                 if river_buffer.contains(Point(x, y)):
+#                     weights = [1 / ((x - px) ** 2 + (y - py) ** 2 + 1e-6) for px, py in coords]
+#                     total_weight = sum(weights)
+#                     raster[i, j] = sum(w * v for w, v in zip(weights, values)) / total_weight
+#                 else:
+#                     raster[i, j] = np.nan  # Mask areas outside buffer
+
+#         # Create in-memory raster
+#         memfile = BytesIO()
+#         with rasterio.open(
+#             memfile, 'w', driver='GTiff', height=height, width=width, count=1,
+#             dtype=raster.dtype, crs=point_gdf.crs, transform=transform
+#         ) as dataset:
+#             dataset.write(raster, 1)
+
+#         # Publish to GeoServer via REST API
+#         geoserver_url = "http://geoserver3:8080/geoserver/rest"
+#         workspace = "myworkspace"
+#         # Use a safe name for the store/layer (remove special characters)
+#         safe_attribute = decoded_attribute.replace('(', '').replace(')', '').replace('/', '_').replace(' ', '_')
+#         store_name = f'{safe_attribute}_raster'
+#         layer_name = f'{safe_attribute}_idw'
+
+#         # Create or update coverage store
+#         headers = {'Content-Type': 'image/tiff', 'Authorization': f'Basic {auth}'}
+#         store_response = requests.put(
+#             f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/file.geotiff',
+#             data=memfile.getvalue(), headers=headers
+#         )
+        
+#         print(f"Store creation response: {store_response.status_code}")
+
+#         # Publish layer
+#         coverage_xml = f"""
+#         <coverage>
+#             <name>{layer_name}</name>
+#             <title>{decoded_attribute} IDW Interpolation</title>
+#             <srs>EPSG:4326</srs>
+#             <nativeCoverageName>{store_name}</nativeCoverageName>
+#         </coverage>
+#         """
+#         coverage_response = requests.post(
+#             f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/coverages',
+#             data=coverage_xml, headers={'Content-Type': 'text/xml', 'Authorization': f'Basic {auth}'}
+#         )
+        
+#         print(f"Coverage creation response: {coverage_response.status_code}")
+
+#         return JsonResponse({
+#             'status': 'success', 
+#             'layer_name': layer_name, 
+#             'wms_url': f'http://geoserver3:8080/geoserver/wms',
+#             'layer': f'{workspace}:{layer_name}'
+#         })
+        
+#     except Exception as e:
+#         print(f"Error in IDW interpolation: {str(e)}")
+#         return JsonResponse({'status': 'error', 'message': str(e)})
+    
 
 from urllib.parse import unquote
-
+auth = base64.b64encode(b'admin:geoserver3').decode("utf-8")
 
 def idw_interpolation(request, attribute):
     try:
         # URL decode the attribute parameter
         decoded_attribute = unquote(attribute)
-        print(f"Original attribute: {attribute}")
-        print(f"Decoded attribute: {decoded_attribute}")
+        print(f"=== DEBUGGING {decoded_attribute} ===")
         
-        # Load point and river shapefiles
+        # Load shapefiles
         riverebuffer_path = os.path.join(settings.MEDIA_ROOT, 'rwm_data', 'RIVER_BUFFER100M_SHP')
         riverebuffer_full_path = os.path.join(riverebuffer_path, 'River_buffer_100m.shp')
         
         point_path = os.path.join(settings.MEDIA_ROOT, 'rwm_data', 'UPDATED_WQA_DATA_points')
         pointbuffer_full_path = os.path.join(point_path, 'UPDATED_WQA_DATA_points.shp')
 
+        # Check if files exist
+        if not os.path.exists(riverebuffer_full_path):
+            return JsonResponse({'status': 'error', 'message': f'River buffer shapefile not found'})
+        if not os.path.exists(pointbuffer_full_path):
+            return JsonResponse({'status': 'error', 'message': f'Points shapefile not found'})
+
+        print(f"Loading shapefiles...")
         point_gdf = gpd.read_file(pointbuffer_full_path)
         river_gdf = gpd.read_file(riverebuffer_full_path)
 
-        # Debug: Print available columns
-        print(f"Available columns in point shapefile: {list(point_gdf.columns)}")
+        # Ensure same CRS
+        print(f"Points CRS: {point_gdf.crs}, River CRS: {river_gdf.crs}")
+        if point_gdf.crs != river_gdf.crs:
+            print(f"Converting CRS from {point_gdf.crs} to {river_gdf.crs}")
+            point_gdf = point_gdf.to_crs(river_gdf.crs)
+
+        print(f"Total points: {len(point_gdf)}")
         
-        # Check if the decoded attribute exists in the shapefile
+        # Check if attribute exists
         if decoded_attribute not in point_gdf.columns:
             return JsonResponse({
                 'status': 'error', 
-                'message': f'Attribute "{decoded_attribute}" not found in shapefile. Available columns: {list(point_gdf.columns)}'
+                'message': f'Attribute "{decoded_attribute}" not found. Available: {list(point_gdf.columns)}'
             })
 
-        # Create 100m buffer around river
-        river_buffer = river_gdf.buffer(100).unary_union
+        # Try to find points within river buffer
+        print(f"Finding points within river buffer...")
+        try:
+            river_buffer = river_gdf.buffer(100).unary_union
+            points_in_buffer = point_gdf[point_gdf.geometry.within(river_buffer)]
+            print(f"Points within 100m buffer: {len(points_in_buffer)}")
+            
+            if len(points_in_buffer) < 5:
+                print("Too few points in buffer, using all points...")
+                points_in_buffer = point_gdf.copy()
+                river_buffer = None
+                
+        except Exception as e:
+            print(f"Buffer error: {e}, using all points")
+            points_in_buffer = point_gdf.copy()
+            river_buffer = None
 
-        # Clip points to buffer
-        point_gdf = point_gdf[point_gdf.geometry.within(river_buffer)]
+        # Extract and clean data
+        coords = [(geom.x, geom.y) for geom in points_in_buffer.geometry]
+        values = points_in_buffer[decoded_attribute].values
 
-        # Extract coordinates and attribute values
-        coords = [(geom.x, geom.y) for geom in point_gdf.geometry]
-        values = point_gdf[decoded_attribute].values  # Use decoded_attribute here
+        # Convert to numeric and filter valid values
+        print(f"Cleaning data...")
+        try:
+            numeric_values = pd.to_numeric(values, errors='coerce')
+            valid_indices = ~np.isnan(numeric_values)
+            
+            # Convert to list for indexing
+            valid_list = valid_indices.tolist() if hasattr(valid_indices, 'tolist') else list(valid_indices)
+            coords = [coords[i] for i in range(len(coords)) if valid_list[i]]
+            values = numeric_values[valid_indices]  # Remove .values since numeric_values might already be numpy array
+            
+            print(f"Valid points: {len(coords)}")
+            print(f"Value range: {np.min(values):.2f} to {np.max(values):.2f}")
+            
+        except Exception as e:
+            return JsonResponse({'status': 'error', 'message': f'Error processing values: {e}'})
 
-        # Handle missing/null values
-        valid_indices = ~np.isnan(values.astype(float))
-        coords = [coords[i] for i in range(len(coords)) if valid_indices[i]]
-        values = values[valid_indices]
+        if len(coords) < 3:
+            return JsonResponse({'status': 'error', 'message': f'Need at least 3 valid points, found {len(coords)}'})
 
-        if len(coords) == 0:
-            return JsonResponse({
-                'status': 'error',
-                'message': f'No valid data points found for attribute "{decoded_attribute}"'
-            })
+        # Calculate bounds
+        if river_buffer is not None:
+            bounds = river_buffer.bounds
+        else:
+            points_bounds = points_in_buffer.total_bounds
+            padding = max(points_bounds[2] - points_bounds[0], points_bounds[3] - points_bounds[1]) * 0.05
+            bounds = (
+                points_bounds[0] - padding,
+                points_bounds[1] - padding, 
+                points_bounds[2] + padding,
+                points_bounds[3] + padding
+            )
 
-        # Define raster parameters
-        bounds = river_buffer.bounds
-        pixel_size = 10  # Adjust resolution as needed
-        width = int((bounds[2] - bounds[0]) / pixel_size)
-        height = int((bounds[3] - bounds[1]) / pixel_size)
+        print(f"Bounds: {bounds}")
+
+        # MUCH SMALLER RASTER for speed - max 100 pixels on longest side
+        width_meters = bounds[2] - bounds[0]
+        height_meters = bounds[3] - bounds[1]
+        
+        # Target max 100 pixels for speed
+        target_pixels = 1000
+        if width_meters > height_meters:
+            pixel_size = width_meters / target_pixels
+        else:
+            pixel_size = height_meters / target_pixels
+        
+        width = int(width_meters / pixel_size)
+        height = int(height_meters / pixel_size)
+        
+        # Ensure reasonable limits
+        width = min(max(width, 20), 150)
+        height = min(max(height, 20), 150)
+        
+        # Recalculate pixel size based on final dimensions
+        pixel_size_x = width_meters / width
+        pixel_size_y = height_meters / height
+        
+        print(f"OPTIMIZED raster dimensions: {width}x{height}")
+        print(f"Total pixels to process: {width * height}")
+
+        # Create coordinate arrays for the entire grid
+        print(f"Creating coordinate grids...")
+        x_coords = np.linspace(bounds[0] + pixel_size_x/2, bounds[2] - pixel_size_x/2, width)
+        y_coords = np.linspace(bounds[3] - pixel_size_y/2, bounds[1] + pixel_size_y/2, height)
+        
+        # Create meshgrid
+        X, Y = np.meshgrid(x_coords, y_coords)
+        
+        # Flatten for interpolation
+        grid_points = np.column_stack([X.ravel(), Y.ravel()])
+        
+        # Convert data points to numpy arrays
+        data_points = np.array(coords)
+        data_values = np.array(values)
+        
+        print(f"Performing FAST IDW interpolation using scipy...")
+        
+        # Use scipy's griddata for much faster interpolation
+        # Try linear first (fastest), fallback to nearest if needed
+        try:
+            interpolated_values = griddata(
+                data_points, data_values, grid_points, 
+                method='linear', fill_value=np.nan
+            )
+        except Exception as e:
+            print(f"Linear interpolation failed: {e}, trying nearest neighbor...")
+            interpolated_values = griddata(
+                data_points, data_values, grid_points, 
+                method='nearest', fill_value=np.nan
+            )
+        
+        # Reshape back to grid
+        raster = interpolated_values.reshape((height, width))
+        
+        # Apply river buffer mask if exists
+        if river_buffer is not None:
+            print("Applying river buffer mask...")
+            for i in range(height):
+                for j in range(width):
+                    x = x_coords[j]
+                    y = y_coords[i]
+                    if not river_buffer.contains(Point(x, y)) and not river_buffer.intersects(Point(x, y)):
+                        raster[i, j] = np.nan
+
+        interpolated_pixels = np.sum(~np.isnan(raster))
+        print(f"Interpolation complete!")
+        print(f"Valid pixels: {interpolated_pixels}")
+        print(f"Raster stats: min={np.nanmin(raster):.2f}, max={np.nanmax(raster):.2f}")
+
+        if np.all(np.isnan(raster)):
+            return JsonResponse({'status': 'error', 'message': 'All raster values are NaN'})
+
+        # Create transform
         transform = from_bounds(bounds[0], bounds[1], bounds[2], bounds[3], width, height)
 
-        # Create an empty raster
-        raster = np.zeros((height, width), dtype=np.float32)
-
-        # Perform IDW interpolation
-        for i in range(height):
-            for j in range(width):
-                x = transform[2] + j * pixel_size
-                y = transform[5] - i * pixel_size
-                if river_buffer.contains(Point(x, y)):
-                    weights = [1 / ((x - px) ** 2 + (y - py) ** 2 + 1e-6) for px, py in coords]
-                    total_weight = sum(weights)
-                    raster[i, j] = sum(w * v for w, v in zip(weights, values)) / total_weight
-                else:
-                    raster[i, j] = np.nan  # Mask areas outside buffer
-
-        # Create in-memory raster
+        # Create in-memory raster file
+        print(f"Creating GeoTIFF...")
         memfile = BytesIO()
         with rasterio.open(
-            memfile, 'w', driver='GTiff', height=height, width=width, count=1,
-            dtype=raster.dtype, crs=point_gdf.crs, transform=transform
+            memfile, 'w', 
+            driver='GTiff', 
+            height=height, 
+            width=width, 
+            count=1,
+            dtype=raster.dtype, 
+            crs=point_gdf.crs, 
+            transform=transform,
+            nodata=np.nan,
+            compress='lzw'
         ) as dataset:
             dataset.write(raster, 1)
 
-        # Publish to GeoServer via REST API
+        raster_size = len(memfile.getvalue())
+        print(f"Raster size: {raster_size/1024:.1f} KB")
+
+        # Publish to GeoServer
+        print(f"Publishing to GeoServer...")
         geoserver_url = "http://geoserver3:8080/geoserver/rest"
         workspace = "myworkspace"
-        # Use a safe name for the store/layer (remove special characters)
-        safe_attribute = decoded_attribute.replace('(', '').replace(')', '').replace('/', '_').replace(' ', '_')
+        
+        safe_attribute = decoded_attribute.replace('(', '').replace(')', '').replace('/', '_').replace(' ', '_').replace('μ', 'u').replace('°', 'deg')
         store_name = f'{safe_attribute}_raster'
         layer_name = f'{safe_attribute}_idw'
 
-        # Create or update coverage store
-        headers = {'Content-Type': 'image/tiff', 'Authorization': 'Basic admin:geoserver3'}
-        store_response = requests.put(
-            f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/file.geotiff',
-            data=memfile.getvalue(), headers=headers
-        )
+        # Create coverage store
+        headers = {'Content-Type': 'image/tiff', 'Authorization': f'Basic {auth}'}
+        store_url = f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/file.geotiff'
         
-        print(f"Store creation response: {store_response.status_code}")
+        store_response = requests.put(store_url, data=memfile.getvalue(), headers=headers)
+        print(f"Store response: {store_response.status_code}")
 
-        # Publish layer
-        coverage_xml = f"""
-        <coverage>
-            <name>{layer_name}</name>
+        if store_response.status_code not in [200, 201]:
+            print(f"Store error: {store_response.text}")
+            return JsonResponse({'status': 'error', 'message': f'GeoServer error: {store_response.status_code}'})
+
+        # Create layer
+        coverage_xml = f"""<coverage>
+            <n>{layer_name}</n>
             <title>{decoded_attribute} IDW Interpolation</title>
             <srs>EPSG:4326</srs>
-            <nativeCoverageName>{store_name}</nativeCoverageName>
-        </coverage>
-        """
+        </coverage>"""
+        
         coverage_response = requests.post(
             f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/coverages',
-            data=coverage_xml, headers={'Content-Type': 'text/xml', 'Authorization': 'Basic admin:geoserver3'}
+            data=coverage_xml, 
+            headers={'Content-Type': 'text/xml', 'Authorization': f'Basic {auth}'}
         )
+        print(f"Coverage response: {coverage_response.status_code}")
+
+        wms_url = f'http://geoserver3:9092/geoserver/wms'
+        layer_full_name = f'{workspace}:{layer_name}'
         
-        print(f"Coverage creation response: {coverage_response.status_code}")
+        preview_url = f"{wms_url}?service=WMS&version=1.1.0&request=GetMap&layers={layer_full_name}&styles=&bbox={bounds[0]},{bounds[1]},{bounds[2]},{bounds[3]}&width=512&height=512&srs=EPSG:4326&format=image/png"
+        
+        print(f"SUCCESS! Layer created: {layer_full_name}")
+        print(f"Preview: {preview_url}")
 
         return JsonResponse({
             'status': 'success', 
             'layer_name': layer_name, 
-            'wms_url': f'http://geoserver3:8080/geoserver/wms',
-            'layer': f'{workspace}:{layer_name}'
+            'wms_url': wms_url,
+            'layer': layer_full_name,
+            'debug_info': {
+                'valid_points': len(coords),
+                'raster_size': f"{width}x{height}",
+                'total_pixels': width * height,
+                'interpolated_pixels': int(interpolated_pixels),
+                'value_range': f"{np.nanmin(raster):.2f} to {np.nanmax(raster):.2f}",
+                'file_size_kb': f"{raster_size/1024:.1f}",
+                'preview_url': preview_url
+            }
         })
         
     except Exception as e:
-        print(f"Error in IDW interpolation: {str(e)}")
+        print(f"ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return JsonResponse({'status': 'error', 'message': str(e)})

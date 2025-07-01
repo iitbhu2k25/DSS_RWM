@@ -60,6 +60,8 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
   const vectorLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const riverBufferLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const riverLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const basinLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
+  const clipped_subdistLayerRef = useRef<VectorLayer<VectorSource> | null>(null);
   const wmsLayerRef = useRef<TileLayer<TileWMS> | null>(null);
   const [selectedPoint, setSelectedPoint] = useState<SamplingPointData | null>(null);
   const [showPanel, setShowPanel] = useState(false);
@@ -114,6 +116,83 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
       });
     };
 
+
+    const fetchbasin = async () => {
+      try {
+        const response = await fetch('/basics/basin/');
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const basin = await response.json();
+
+        const basinSource = new VectorSource({
+          features: new GeoJSON().readFeatures(basin, {
+            featureProjection: 'EPSG:3857',
+          }),
+        });
+
+        basinLayerRef.current = new VectorLayer({
+          source: basinSource,
+          style: new Style({
+            stroke: new Stroke({
+              color: 'rgb(81, 0, 255)',
+              width: 2
+            }),
+          }),
+        });
+
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.addLayer(basinLayerRef.current);
+          const extent = basinSource.getExtent();
+          if (!extent.includes(Infinity) && !extent.includes(-Infinity)) {
+            mapInstanceRef.current.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 1000 });
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching river buffer GeoJSON:', error);
+      }
+    };
+
+
+
+
+    const fetchclipped_subdist = async () => {
+      try {
+        const response = await fetch(`${backendUrl}/rwm/clipped_subdist/`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+        const clipped_subdist = await response.json();
+
+        const clipped_subdistSource = new VectorSource({
+          features: new GeoJSON().readFeatures(clipped_subdist, {
+            featureProjection: 'EPSG:3857',
+          }),
+        });
+
+        clipped_subdistLayerRef.current = new VectorLayer({
+          source: clipped_subdistSource,
+          style: new Style({
+            stroke: new Stroke({
+              color: 'rgba(0, 255, 204, 0.27)',
+              width: 2
+            }),
+          }),
+        });
+
+        if (mapInstanceRef.current) {
+          mapInstanceRef.current.addLayer(clipped_subdistLayerRef.current);
+          const extent = clipped_subdistSource.getExtent();
+          if (!extent.includes(Infinity) && !extent.includes(-Infinity)) {
+            mapInstanceRef.current.getView().fit(extent, { padding: [50, 50, 50, 50], duration: 1000 });
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching river buffer GeoJSON:', error);
+      }
+    };
+
+
+
+
+
+
     const fetchSamplingPoints = async () => {
       try {
         const response = await fetch(`${backendUrl}/rwm/shapefile/`);
@@ -163,10 +242,11 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
             stroke: new Stroke({
               color: 'rgb(255, 234, 0)',
               width: 4
-            }), }),
-          });
+            }),
+          }),
+        });
 
-          if(mapInstanceRef.current) {
+        if (mapInstanceRef.current) {
           mapInstanceRef.current.addLayer(riverBufferLayerRef.current);
           const extent = riverBufferSource.getExtent();
           if (!extent.includes(Infinity) && !extent.includes(-Infinity)) {
@@ -212,6 +292,8 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
     fetchSamplingPoints();
     fetchRiverBuffer();
     fetchRiver();
+    fetchbasin();
+    fetchclipped_subdist();
 
     return () => {
       if (mapInstanceRef.current) {
@@ -221,155 +303,289 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
     };
   }, [csvData, backendUrl]);
 
-  useEffect(() => {
-    if (!mapInstanceRef.current || !selectedLayer) return;
 
-    // Remove existing WMS layer
-    if (wmsLayerRef.current) {
-      mapInstanceRef.current.removeLayer(wmsLayerRef.current);
-      wmsLayerRef.current = null;
-    }
+
+
+
+
+
+
+
+
+    // Add this debugging code to your useEffect where you handle selectedLayer
+
+    useEffect(() => {
+      if (!mapInstanceRef.current || !selectedLayer) return;
+
+      console.log('=== WMS LAYER DEBUG ===');
+      console.log('Selected layer:', selectedLayer);
+
+      // Remove existing WMS layer
+      if (wmsLayerRef.current) {
+        console.log('Removing existing WMS layer');
+        mapInstanceRef.current.removeLayer(wmsLayerRef.current);
+        wmsLayerRef.current = null;
+      }
+
+      // Trigger interpolation and add new WMS layer
+      const fetchInterpolatedLayer = async () => {
+        try {
+          const url = `http://172.29.192.1:9000/rwm/interpolate/${encodeURIComponent(selectedLayer)}/`;
+          console.log('Fetching from URL:', url);
+
+          const response = await fetch(url);
+          console.log('Response status:', response.status);
+
+          if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+          const data = await response.json();
+          console.log('Response data:', data);
+
+          if (data.status === 'success') {
+            console.log('Creating WMS layer with:', {
+              wms_url: data.wms_url,
+              layer: data.layer
+            });
+
+            // Test the WMS URL first
+            const testUrl = `${data.wms_url}?service=WMS&version=1.1.0&request=GetCapabilities`;
+            console.log('Testing WMS capabilities:', testUrl);
+
+            try {
+              const testResponse = await fetch(testUrl);
+              console.log('WMS capabilities response:', testResponse.status);
+            } catch (testError) {
+              console.error('WMS capabilities test failed:', testError);
+            }
+
+            const wmsLayer = new TileLayer({
+              source: new TileWMS({
+                url: data.wms_url,
+                params: {
+                  LAYERS: data.layer,
+                  TILED: true,
+                  VERSION: '1.1.0',
+                  FORMAT: 'image/png',
+                  TRANSPARENT: true
+                },
+                serverType: 'geoserver',
+                // Add error handling
+                imageLoadFunction: (image: any, src: string) => {
+                  console.log('Loading WMS tile:', src);
+                  (image.getImage() as HTMLImageElement).onload = () => {
+                    console.log('WMS tile loaded successfully');
+                  };
+                  (image.getImage() as HTMLImageElement).onerror = (error) => {
+                    console.error('WMS tile failed to load:', error, 'URL:', src);
+                  };
+                  (image.getImage() as HTMLImageElement).src = src;
+                }
+              }),
+              opacity: 0.7,
+              visible: true
+            });
+
+            // Add event listeners to the layer
+            wmsLayer.getSource()?.on('tileloaderror', (event) => {
+              console.error('Tile load error:', event);
+            });
+
+            wmsLayer.getSource()?.on('tileloadstart', (event) => {
+              console.log('Tile load start:', event);
+            });
+
+            wmsLayer.getSource()?.on('tileloadend', (event) => {
+              console.log('Tile load end:', event);
+            });
+
+            wmsLayerRef.current = wmsLayer;
+            mapInstanceRef.current?.addLayer(wmsLayer);
+
+            console.log('WMS layer added to map');
+            console.log('Map layers count:', mapInstanceRef.current?.getLayers().getLength());
+
+            // Force a refresh
+            mapInstanceRef.current?.render();
+
+            setLayers((prev) => {
+              if (!prev.some((l) => l.name === selectedLayer)) {
+                return [...prev, { name: selectedLayer, wms_url: data.wms_url, layer: data.layer }];
+              }
+              return prev;
+            });
+          } else {
+            console.error('Interpolation failed:', data);
+          }
+        } catch (error) {
+          console.error('Error fetching interpolated layer:', error);
+        }
+      };
+
+      if (selectedLayer) {
+        fetchInterpolatedLayer();
+      }
+    }, [selectedLayer, backendUrl]);
+
+
+
+
+
+
+
+
+
+
+
+  // useEffect(() => {
+  //   if (!mapInstanceRef.current || !selectedLayer) return;
+
+  //   // Remove existing WMS layer
+  //   if (wmsLayerRef.current) {
+  //     mapInstanceRef.current.removeLayer(wmsLayerRef.current);
+  //     wmsLayerRef.current = null;
+  //   }
+
 
     // Trigger interpolation and add new WMS layer
-    const fetchInterpolatedLayer = async () => {
-      try {
-        const response = await fetch(`${backendUrl}/interpolate/${encodeURIComponent(selectedLayer)}/`);
-        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-        const data = await response.json();
-        if (data.status === 'success') {
-          const wmsLayer = new TileLayer({
-            source: new TileWMS({
-              url: data.wms_url,
-              params: { LAYERS: data.layer, TILED: true },
-              serverType: 'geoserver',
-            }),
-            opacity: 0.7,
-          });
-          wmsLayerRef.current = wmsLayer;
-          mapInstanceRef.current?.addLayer(wmsLayer);
-          setLayers((prev) => {
-            if (!prev.some((l) => l.name === selectedLayer)) {
-              return [...prev, { name: selectedLayer, wms_url: data.wms_url, layer: data.layer }];
-            }
-            return prev;
-          });
-        }
-      } catch (error) {
-        console.error('Error fetching interpolated layer:', error);
+    //   const fetchInterpolatedLayer = async () => {
+    //     try {
+    //       const response = await fetch(`http://172.29.192.1:9000/rwm/interpolate/`);
+    //       if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+    //       const data = await response.json();
+    //       if (data.status === 'success') {
+    //         const wmsLayer = new TileLayer({
+    //           source: new TileWMS({
+    //             url: data.wms_url,
+    //             params: { LAYERS: data.layer, TILED: true },
+    //             serverType: 'geoserver',
+    //           }),
+    //           opacity: 0.7,
+    //         });
+    //         wmsLayerRef.current = wmsLayer;
+    //         mapInstanceRef.current?.addLayer(wmsLayer);
+    //         setLayers((prev) => {
+    //           if (!prev.some((l) => l.name === selectedLayer)) {
+    //             return [...prev, { name: selectedLayer, wms_url: data.wms_url, layer: data.layer }];
+    //           }
+    //           return prev;
+    //         });
+    //       }
+    //     } catch (error) {
+    //       console.error('Error fetching interpolated layer:', error);
+    //     }
+    //   };
+
+    //   if (selectedLayer) {
+    //     fetchInterpolatedLayer();
+    //   }
+    // }, [selectedLayer, backendUrl]);
+
+    const formatValue = (value: any): string => {
+      if (value === null || value === undefined || value === '') {
+        return 'N/A';
       }
+      if (typeof value === 'number') {
+        return value.toFixed(2);
+      }
+      return String(value);
     };
 
-    if (selectedLayer) {
-      fetchInterpolatedLayer();
-    }
-  }, [selectedLayer, backendUrl]);
-
-  const formatValue = (value: any): string => {
-    if (value === null || value === undefined || value === '') {
-      return 'N/A';
-    }
-    if (typeof value === 'number') {
-      return value.toFixed(2);
-    }
-    return String(value);
-  };
-
-  const getParameterCategory = (key: string): string => {
-    const physicalParams = ['Temperature (°C)', 'Turbidity (FNU)', 'TDS (ppm)', 'TSS(mg/l)', 'TS_mg_l_'];
-    const chemicalParams = ['pH', 'DO (mg/L)', 'ORP', 'EC (μS/cm)', 'COD', 'BOD(mg/l)', 'Chloride(mg/l)', 'Nitrate', 'Hardness(mg/l)'];
-    const biologicalParams = ['Faecal Coliform (CFU/100 mL)', 'Total Coliform (CFU/100 mL)'];
-    if (physicalParams.includes(key)) return 'Physical Parameters';
-    if (chemicalParams.includes(key)) return 'Chemical Parameters';
-    if (biologicalParams.includes(key)) return 'Biological Parameters';
-    return 'General Information';
-  };
-
-  const renderParametersByCategory = () => {
-    if (!selectedPoint) return null;
-
-    const categories: { [key: string]: Array<[string, any]> } = {
-      'General Information': [],
-      'Physical Parameters': [],
-      'Chemical Parameters': [],
-      'Biological Parameters': [],
+    const getParameterCategory = (key: string): string => {
+      const physicalParams = ['Temperature (°C)', 'Turbidity (FNU)', 'TDS (ppm)', 'TSS(mg/l)', 'TS_mg_l_'];
+      const chemicalParams = ['pH', 'DO (mg/L)', 'ORP', 'EC (μS/cm)', 'COD', 'BOD(mg/l)', 'Chloride(mg/l)', 'Nitrate', 'Hardness(mg/l)'];
+      const biologicalParams = ['Faecal Coliform (CFU/100 mL)', 'Total Coliform (CFU/100 mL)'];
+      if (physicalParams.includes(key)) return 'Physical Parameters';
+      if (chemicalParams.includes(key)) return 'Chemical Parameters';
+      if (biologicalParams.includes(key)) return 'Biological Parameters';
+      return 'General Information';
     };
 
-    Object.entries(selectedPoint).forEach(([key, value]) => {
-      if (key === 'geometry') return;
-      const category = getParameterCategory(key);
-      categories[category].push([key, value]);
-    });
+    const renderParametersByCategory = () => {
+      if (!selectedPoint) return null;
 
-    return Object.entries(categories).map(([category, params]) => {
-      if (params.length === 0) return null;
-      return (
-        <div key={category} className="mb-4">
-          <h4 className="font-semibold text-blue-700 mb-2 border-b border-blue-200 pb-1">
-            {category}
-          </h4>
-          <div className="grid grid-cols-1 gap-2">
-            {params.map(([key, value]) => (
-              <div key={key} className="flex justify-between items-center py-1 px-2 hover:bg-gray-50 rounded">
-                <span className="text-sm font-medium text-gray-700">{key}:</span>
-                <span className="text-sm text-gray-900 font-mono">{formatValue(value)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-      );
-    });
-  };
+      const categories: { [key: string]: Array<[string, any]> } = {
+        'General Information': [],
+        'Physical Parameters': [],
+        'Chemical Parameters': [],
+        'Biological Parameters': [],
+      };
 
-  return (
-    <div className="h-full w-full relative">
-      <div className="absolute top-4 left-4 z-10">
-        <select
-          value={selectedLayer}
-          onChange={(e) => setSelectedLayer(e.target.value)}
-          className="p-2 border rounded bg-white shadow-md"
-        >
-          <option value="">Select Parameter</option>
-          {attributes.map((attr) => (
-            <option key={attr} value={attr}>
-              {attr}
-            </option>
-          ))}
-        </select>
-      </div>
-      <div ref={mapRef} className="h-full w-full" />
-      {showPanel && selectedPoint && (
-        <div className="absolute top-4 right-4 bg-white rounded-lg shadow-lg border max-w-sm max-h-96 overflow-y-auto z-10">
-          <div className="p-4">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="text-lg font-bold text-gray-800">Sampling Point Details</h3>
-              <button
-                onClick={() => setShowPanel(false)}
-                className="text-gray-500 hover:text-gray-700 font-bold text-xl"
-              >
-                ×
-              </button>
+      Object.entries(selectedPoint).forEach(([key, value]) => {
+        if (key === 'geometry') return;
+        const category = getParameterCategory(key);
+        categories[category].push([key, value]);
+      });
+
+      return Object.entries(categories).map(([category, params]) => {
+        if (params.length === 0) return null;
+        return (
+          <div key={category} className="mb-4">
+            <h4 className="font-semibold text-blue-700 mb-2 border-b border-blue-200 pb-1">
+              {category}
+            </h4>
+            <div className="grid grid-cols-1 gap-2">
+              {params.map(([key, value]) => (
+                <div key={key} className="flex justify-between items-center py-1 px-2 hover:bg-gray-50 rounded">
+                  <span className="text-sm font-medium text-gray-700">{key}:</span>
+                  <span className="text-sm text-gray-900 font-mono">{formatValue(value)}</span>
+                </div>
+              ))}
             </div>
-            {selectedPoint['Sampling Location'] && (
-              <div className="mb-4 p-3 bg-blue-50 rounded-lg">
-                <h4 className="font-semibold text-blue-800">{selectedPoint['Sampling Location']}</h4>
-                {selectedPoint['STATUS'] && (
-                  <span
-                    className={`inline-block mt-1 px-2 py-1 rounded text-xs font-medium ${selectedPoint['STATUS']?.toString().toLowerCase() === 'active'
+          </div>
+        );
+      });
+    };
+
+    return (
+      <div className="h-full w-full relative">
+        <div className="absolute top-4 left-4 z-10">
+          <select
+            value={selectedLayer}
+            onChange={(e) => setSelectedLayer(e.target.value)}
+            className="p-2 border rounded bg-white shadow-md"
+          >
+            <option value="">Select Parameter</option>
+            {attributes.map((attr) => (
+              <option key={attr} value={attr}>
+                {attr}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div ref={mapRef} className="h-full w-full" />
+        {showPanel && selectedPoint && (
+          <div className="absolute top-4 right-4 bg-white rounded-lg shadow-lg border max-w-sm max-h-96 overflow-y-auto z-10">
+            <div className="p-4">
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="text-lg font-bold text-gray-800">Sampling Point Details</h3>
+                <button
+                  onClick={() => setShowPanel(false)}
+                  className="text-gray-500 hover:text-gray-700 font-bold text-xl"
+                >
+                  ×
+                </button>
+              </div>
+              {selectedPoint['Sampling Location'] && (
+                <div className="mb-4 p-3 bg-blue-50 rounded-lg">
+                  <h4 className="font-semibold text-blue-800">{selectedPoint['Sampling Location']}</h4>
+                  {selectedPoint['STATUS'] && (
+                    <span
+                      className={`inline-block mt-1 px-2 py-1 rounded text-xs font-medium ${selectedPoint['STATUS']?.toString().toLowerCase() === 'active'
                         ? 'bg-green-100 text-green-800'
                         : 'bg-red-100 text-red-800'
-                      }`}
-                  >
-                    {selectedPoint['STATUS']}
-                  </span>
-                )}
-              </div>
-            )}
-            <div className="space-y-2">{renderParametersByCategory()}</div>
+                        }`}
+                    >
+                      {selectedPoint['STATUS']}
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="space-y-2">{renderParametersByCategory()}</div>
+            </div>
           </div>
-        </div>
-      )}
-    </div>
-  );
-};
+        )}
+      </div>
+    );
+  };
 
-export default MapComponent;
+  export default MapComponent;

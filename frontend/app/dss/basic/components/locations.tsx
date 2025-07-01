@@ -151,7 +151,7 @@ const LocationSelector: React.FC<LocationSelectorProps> = ({ onConfirm, onReset,
         }));
 
         setStates(stateData);
-      } catch (error) {
+      } catch(error) {
         console.error('Error fetching states:', error);
       }
     };

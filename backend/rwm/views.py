@@ -9,8 +9,7 @@ from rest_framework.response import Response
 from rest_framework import status
 import pandas as pd
 from shapely.geometry import Point 
-
-from .models import WaterQuality_overall, WaterQuality_upstream, WaterQuality_downstream    
+from .models import WaterQuality_sampling_data, WaterQuality_upstream, WaterQuality_downstream    
 import geopandas as gpd
 import os
 import json
@@ -47,7 +46,7 @@ def water_quality_data(request, data_type='overall'):
     try:
 
         if data_type == 'overall':
-            model = WaterQuality_overall  # You'll need to create this model
+            model =WaterQuality_sampling_data  # You'll need to create this model
         elif data_type == 'upstream':
             model = WaterQuality_upstream
         elif data_type == 'downstream':
@@ -58,7 +57,9 @@ def water_quality_data(request, data_type='overall'):
 
 
         data = model.objects.all().values(
-            's_no', 'sampling', 'location', 'status', 'latitude', 'longitude', 
+             
+ 
+                     'Sub_District','Sub_District_Code','District_Code','s_no', 'sampling', 'location', 'status', 'latitude', 'longitude', 
             'ph', 'tds', 'ec', 'temperature', 'turbidity', 'do', 'orp', 'tss', 
             'cod', 'bod', 'ts', 'chloride', 'nitrate', 'hardness', 
             'faecal_coliform', 'total_coliform'
@@ -601,7 +602,7 @@ def idw_interpolation(request, attribute):
         decoded_attribute = unquote(attribute)
         print(f"=== DEBUGGING {decoded_attribute} ===")
         
-        # Load shapefiles
+        # Load shapefiles - OPTIMIZATION: Only load required columns
         riverebuffer_path = os.path.join(settings.MEDIA_ROOT, 'rwm_data', 'RIVER_BUFFER100M_SHP')
         riverebuffer_full_path = os.path.join(riverebuffer_path, 'River_buffer_100m.shp')
         
@@ -615,7 +616,8 @@ def idw_interpolation(request, attribute):
             return JsonResponse({'status': 'error', 'message': f'Points shapefile not found'})
 
         print(f"Loading shapefiles...")
-        point_gdf = gpd.read_file(pointbuffer_full_path)
+        # Only read required columns for points
+        point_gdf = gpd.read_file(pointbuffer_full_path, columns=['geometry', decoded_attribute])
         river_gdf = gpd.read_file(riverebuffer_full_path)
 
         # Ensure same CRS
@@ -633,37 +635,49 @@ def idw_interpolation(request, attribute):
                 'message': f'Attribute "{decoded_attribute}" not found. Available: {list(point_gdf.columns)}'
             })
 
-        # Try to find points within river buffer
+        # Use spatial index for faster intersection
         print(f"Finding points within river buffer...")
         try:
-            river_buffer = river_gdf.buffer(100).unary_union
-            points_in_buffer = point_gdf[point_gdf.geometry.within(river_buffer)]
+            # Create spatial index for faster queries
+            spatial_index = river_gdf.sindex
+            
+            # Get buffer geometry more efficiently
+            river_buffer = river_gdf.geometry.unary_union
+            
+            # Use spatial index to pre-filter points
+            possible_matches_index = list(spatial_index.intersection(point_gdf.total_bounds))
+            possible_matches = river_gdf.iloc[possible_matches_index] if possible_matches_index else river_gdf
+            
+            # Now do the actual intersection on pre-filtered data
+            buffer_geom = possible_matches.geometry.unary_union.buffer(100)
+            points_in_buffer = point_gdf[point_gdf.intersects(buffer_geom)]
+            
             print(f"Points within 100m buffer: {len(points_in_buffer)}")
             
             if len(points_in_buffer) < 5:
                 print("Too few points in buffer, using all points...")
                 points_in_buffer = point_gdf.copy()
-                river_buffer = None
+                buffer_geom = None
                 
         except Exception as e:
             print(f"Buffer error: {e}, using all points")
             points_in_buffer = point_gdf.copy()
-            river_buffer = None
+            buffer_geom = None
 
-        # Extract and clean data
-        coords = [(geom.x, geom.y) for geom in points_in_buffer.geometry]
-        values = points_in_buffer[decoded_attribute].values
-
-        # Convert to numeric and filter valid values
+        # Vectorized data cleaning
         print(f"Cleaning data...")
         try:
-            numeric_values = pd.to_numeric(values, errors='coerce')
-            valid_indices = ~np.isnan(numeric_values)
+            # Remove rows with null geometries or attribute values first
+            points_clean = points_in_buffer.dropna(subset=['geometry', decoded_attribute])
             
-            # Convert to list for indexing
-            valid_list = valid_indices.tolist() if hasattr(valid_indices, 'tolist') else list(valid_indices)
-            coords = [coords[i] for i in range(len(coords)) if valid_list[i]]
-            values = numeric_values[valid_indices]  # Remove .values since numeric_values might already be numpy array
+            # Convert to numeric in one operation
+            numeric_values = pd.to_numeric(points_clean[decoded_attribute], errors='coerce')
+            points_clean = points_clean[~numeric_values.isna()]
+            numeric_values = numeric_values.dropna()
+            
+            # Extract coordinates efficiently
+            coords = np.array([[geom.x, geom.y] for geom in points_clean.geometry])
+            values = numeric_values.values
             
             print(f"Valid points: {len(coords)}")
             print(f"Value range: {np.min(values):.2f} to {np.max(values):.2f}")
@@ -675,10 +689,10 @@ def idw_interpolation(request, attribute):
             return JsonResponse({'status': 'error', 'message': f'Need at least 3 valid points, found {len(coords)}'})
 
         # Calculate bounds
-        if river_buffer is not None:
-            bounds = river_buffer.bounds
+        if buffer_geom is not None:
+            bounds = buffer_geom.bounds
         else:
-            points_bounds = points_in_buffer.total_bounds
+            points_bounds = points_clean.total_bounds
             padding = max(points_bounds[2] - points_bounds[0], points_bounds[3] - points_bounds[1]) * 0.05
             bounds = (
                 points_bounds[0] - padding,
@@ -689,74 +703,96 @@ def idw_interpolation(request, attribute):
 
         print(f"Bounds: {bounds}")
 
-        # MUCH SMALLER RASTER for speed - max 100 pixels on longest side
+        # Adaptive raster size based on data density
         width_meters = bounds[2] - bounds[0]
         height_meters = bounds[3] - bounds[1]
+        area_sqkm = (width_meters * height_meters) / 1_000_000
         
-        # Target max 100 pixels for speed
-        target_pixels = 1000
-        if width_meters > height_meters:
-            pixel_size = width_meters / target_pixels
-        else:
-            pixel_size = height_meters / target_pixels
+        # Adaptive pixel size based on area and point density
+        point_density = len(coords) / area_sqkm if area_sqkm > 0 else 1
         
-        width = int(width_meters / pixel_size)
-        height = int(height_meters / pixel_size)
+        if point_density > 10:  # High density
+            target_pixels = 150
+        elif point_density > 5:  # Medium density
+            target_pixels = 100
+        else:  # Low density
+            target_pixels = 3438
+            
+        pixel_size = max(width_meters, height_meters) / target_pixels
+        width = max(20, min(200, int(width_meters / pixel_size)))
+        height = max(20, min(200, int(height_meters / pixel_size)))
         
-        # Ensure reasonable limits
-        width = min(max(width, 20), 150)
-        height = min(max(height, 20), 150)
-        
-        # Recalculate pixel size based on final dimensions
-        pixel_size_x = width_meters / width
-        pixel_size_y = height_meters / height
-        
-        print(f"OPTIMIZED raster dimensions: {width}x{height}")
+        print(f"ADAPTIVE raster dimensions: {width}x{height} (density: {point_density:.1f} pts/km²)")
         print(f"Total pixels to process: {width * height}")
 
-        # Create coordinate arrays for the entire grid
-        print(f"Creating coordinate grids...")
-        x_coords = np.linspace(bounds[0] + pixel_size_x/2, bounds[2] - pixel_size_x/2, width)
-        y_coords = np.linspace(bounds[3] - pixel_size_y/2, bounds[1] + pixel_size_y/2, height)
-        
-        # Create meshgrid
-        X, Y = np.meshgrid(x_coords, y_coords)
-        
-        # Flatten for interpolation
-        grid_points = np.column_stack([X.ravel(), Y.ravel()])
-        
-        # Convert data points to numpy arrays
-        data_points = np.array(coords)
-        data_values = np.array(values)
-        
-        print(f"Performing FAST IDW interpolation using scipy...")
-        
-        # Use scipy's griddata for much faster interpolation
-        # Try linear first (fastest), fallback to nearest if needed
-        try:
-            interpolated_values = griddata(
-                data_points, data_values, grid_points, 
-                method='linear', fill_value=np.nan
-            )
-        except Exception as e:
-            print(f"Linear interpolation failed: {e}, trying nearest neighbor...")
-            interpolated_values = griddata(
-                data_points, data_values, grid_points, 
-                method='nearest', fill_value=np.nan
-            )
+        # Use KDTree for faster nearest neighbor if many points
+        if len(coords) > 100:
+            print(f"Using KDTree for large dataset...")
+            from scipy.spatial import cKDTree
+            
+            # Create coordinate arrays
+            x_coords = np.linspace(bounds[0], bounds[2], width)
+            y_coords = np.linspace(bounds[3], bounds[1], height)
+            X, Y = np.meshgrid(x_coords, y_coords)
+            grid_points = np.column_stack([X.ravel(), Y.ravel()])
+            
+            # Use KDTree for faster distance calculations
+            tree = cKDTree(coords)
+            
+            # IDW with limited number of nearest neighbors (much faster)
+            k_neighbors = min(10, len(coords))  # Use max 10 nearest points
+            distances, indices = tree.query(grid_points, k=k_neighbors)
+            
+            # Avoid division by zero
+            distances = np.where(distances == 0, 1e-10, distances)
+            
+            # IDW weights (power=2)
+            weights = 1.0 / (distances ** 2)
+            weights_sum = np.sum(weights, axis=1)
+            
+            # Calculate weighted values
+            weighted_values = np.sum(weights * values[indices], axis=1)
+            interpolated_values = weighted_values / weights_sum
+            
+        else:
+            print(f"Using scipy griddata for small dataset...")
+            # Create coordinate arrays
+            x_coords = np.linspace(bounds[0], bounds[2], width)
+            y_coords = np.linspace(bounds[3], bounds[1], height)
+            X, Y = np.meshgrid(x_coords, y_coords)
+            grid_points = np.column_stack([X.ravel(), Y.ravel()])
+            
+            # Use scipy's griddata (faster for small datasets)
+            try:
+                interpolated_values = griddata(
+                    coords, values, grid_points, 
+                    method='linear', fill_value=np.nan
+                )
+            except:
+                interpolated_values = griddata(
+                    coords, values, grid_points, 
+                    method='nearest', fill_value=np.nan
+                )
         
         # Reshape back to grid
         raster = interpolated_values.reshape((height, width))
         
-        # Apply river buffer mask if exists
-        if river_buffer is not None:
-            print("Applying river buffer mask...")
-            for i in range(height):
-                for j in range(width):
-                    x = x_coords[j]
-                    y = y_coords[i]
-                    if not river_buffer.contains(Point(x, y)) and not river_buffer.intersects(Point(x, y)):
-                        raster[i, j] = np.nan
+        # Faster masking using rasterio features
+        if buffer_geom is not None:
+            print("Applying optimized buffer mask...")
+            from rasterio.features import geometry_mask
+            from rasterio.transform import from_bounds
+            
+            transform = from_bounds(bounds[0], bounds[1], bounds[2], bounds[3], width, height)
+            
+            # Create mask more efficiently
+            mask = geometry_mask(
+                [buffer_geom], 
+                transform=transform, 
+                invert=True, 
+                out_shape=(height, width)
+            )
+            raster[~mask] = np.nan
 
         interpolated_pixels = np.sum(~np.isnan(raster))
         print(f"Interpolation complete!")
@@ -769,66 +805,140 @@ def idw_interpolation(request, attribute):
         # Create transform
         transform = from_bounds(bounds[0], bounds[1], bounds[2], bounds[3], width, height)
 
-        # Create in-memory raster file
-        print(f"Creating GeoTIFF...")
+        # More efficient raster creation
+        print(f"Creating optimized GeoTIFF...")
         memfile = BytesIO()
+        
+        # Use float32 instead of float64 to reduce file size
+        raster_optimized = raster.astype(np.float32)
+        
         with rasterio.open(
             memfile, 'w', 
             driver='GTiff', 
             height=height, 
             width=width, 
             count=1,
-            dtype=raster.dtype, 
+            dtype=np.float32,  # Smaller file size
             crs=point_gdf.crs, 
             transform=transform,
-            nodata=np.nan,
-            compress='lzw'
+            nodata=-9999,  # Use a proper nodata value instead of NaN
+            compress='lzw',
+            tiled=True,  # Better for web serving
+            blockxsize=256,
+            blockysize=256
         ) as dataset:
-            dataset.write(raster, 1)
+            # Replace NaN with nodata value
+            raster_optimized = np.where(np.isnan(raster_optimized), -9999, raster_optimized)
+            dataset.write(raster_optimized, 1)
 
         raster_size = len(memfile.getvalue())
-        print(f"Raster size: {raster_size/1024:.1f} KB")
+        print(f"Optimized raster size: {raster_size/1024:.1f} KB")
 
-        # Publish to GeoServer
-        print(f"Publishing to GeoServer...")
+        # SOLUTION A: Proper GeoServer cleanup sequence (Layer → Coverage → Store)
+        print(f"Publishing to GeoServer with proper cleanup...")
         geoserver_url = "http://geoserver3:8080/geoserver/rest"
         workspace = "myworkspace"
-        
+
         safe_attribute = decoded_attribute.replace('(', '').replace(')', '').replace('/', '_').replace(' ', '_').replace('μ', 'u').replace('°', 'deg')
         store_name = f'{safe_attribute}_raster'
         layer_name = f'{safe_attribute}_idw'
 
-        # Create coverage store
-        headers = {'Content-Type': 'image/tiff', 'Authorization': f'Basic {auth}'}
-        store_url = f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/file.geotiff'
-        
-        store_response = requests.put(store_url, data=memfile.getvalue(), headers=headers)
-        print(f"Store response: {store_response.status_code}")
+        headers_auth = {'Authorization': f'Basic {auth}'}
+
+        # Step 1: Delete existing LAYER first (this is what was missing!)
+        layer_check_url = f'{geoserver_url}/workspaces/{workspace}/layers/{layer_name}'
+        layer_check_response = requests.get(layer_check_url, headers=headers_auth)
+
+        if layer_check_response.status_code == 200:
+            print(f"Layer {layer_name} exists, deleting layer...")
+            layer_delete_response = requests.delete(layer_check_url, headers=headers_auth)
+            print(f"Delete layer response: {layer_delete_response.status_code}")
+            
+            if layer_delete_response.status_code not in [200, 204]:
+                print(f"Layer delete warning: {layer_delete_response.text}")
+
+        # Step 2: Delete existing COVERAGE
+        coverage_check_url = f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/coverages/{layer_name}'
+        coverage_check_response = requests.get(coverage_check_url, headers=headers_auth)
+
+        if coverage_check_response.status_code == 200:
+            print(f"Coverage {layer_name} exists, deleting coverage...")
+            coverage_delete_response = requests.delete(coverage_check_url, headers=headers_auth)
+            print(f"Delete coverage response: {coverage_delete_response.status_code}")
+            
+            if coverage_delete_response.status_code not in [200, 204]:
+                print(f"Coverage delete warning: {coverage_delete_response.text}")
+
+        # Step 3: Delete existing COVERAGE STORE
+        store_check_url = f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}'
+        store_check_response = requests.get(store_check_url, headers=headers_auth)
+
+        if store_check_response.status_code == 200:
+            print(f"Coverage store {store_name} exists, deleting store...")
+            store_delete_response = requests.delete(store_check_url, headers=headers_auth)
+            print(f"Delete store response: {store_delete_response.status_code}")
+            
+            if store_delete_response.status_code not in [200, 204]:
+                print(f"Store delete warning: {store_delete_response.text}")
+
+        # Step 4: Create new coverage store
+        headers_tiff = {'Content-Type': 'image/tiff', 'Authorization': f'Basic {auth}'}
+        store_create_url = f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/file.geotiff'
+
+        store_response = requests.put(store_create_url, data=memfile.getvalue(), headers=headers_tiff)
+        print(f"Store creation response: {store_response.status_code}")
 
         if store_response.status_code not in [200, 201]:
-            print(f"Store error: {store_response.text}")
-            return JsonResponse({'status': 'error', 'message': f'GeoServer error: {store_response.status_code}'})
+            print(f"Store creation error: {store_response.text}")
+            return JsonResponse({'status': 'error', 'message': f'GeoServer store error: {store_response.status_code}'})
 
-        # Create layer
+        # Step 5: Create new coverage with FIXED name tag
         coverage_xml = f"""<coverage>
-            <n>{layer_name}</n>
+            <name>{layer_name}</name>
             <title>{decoded_attribute} IDW Interpolation</title>
-            <srs>EPSG:4326</srs>
+            <srs>{point_gdf.crs}</srs>
         </coverage>"""
-        
-        coverage_response = requests.post(
+
+        coverage_create_response = requests.post(
             f'{geoserver_url}/workspaces/{workspace}/coveragestores/{store_name}/coverages',
             data=coverage_xml, 
             headers={'Content-Type': 'text/xml', 'Authorization': f'Basic {auth}'}
         )
-        print(f"Coverage response: {coverage_response.status_code}")
+        print(f"Coverage creation response: {coverage_create_response.status_code}")
 
-        wms_url = f'http://geoserver3:9092/geoserver/wms'
+        if coverage_create_response.status_code not in [200, 201]:
+            print(f"Coverage creation error: {coverage_create_response.text}")
+            return JsonResponse({'status': 'error', 'message': f'Coverage creation failed: {coverage_create_response.status_code}'})
+
+        # Step 6: Verify layer was auto-created (GeoServer usually auto-creates the layer)
+        layer_verify_response = requests.get(layer_check_url, headers=headers_auth)
+        if layer_verify_response.status_code != 200:
+            print(f"Layer not auto-created, creating manually...")
+            # Create layer manually if needed
+            layer_xml = f"""<layer>
+                <name>{layer_name}</name>
+                <type>RASTER</type>
+                <defaultStyle>
+                    <name>raster</name>
+                </defaultStyle>
+                <resource class="coverage">
+                    <name>{workspace}:{layer_name}</name>
+                </resource>
+            </layer>"""
+            
+            layer_create_response = requests.post(
+                f'{geoserver_url}/workspaces/{workspace}/layers',
+                data=layer_xml,
+                headers={'Content-Type': 'text/xml', 'Authorization': f'Basic {auth}'}
+            )
+            print(f"Layer creation response: {layer_create_response.status_code}")
+
+        wms_url =  f'http://172.29.192.1:9092/geoserver/wms'
         layer_full_name = f'{workspace}:{layer_name}'
-        
+
         preview_url = f"{wms_url}?service=WMS&version=1.1.0&request=GetMap&layers={layer_full_name}&styles=&bbox={bounds[0]},{bounds[1]},{bounds[2]},{bounds[3]}&width=512&height=512&srs=EPSG:4326&format=image/png"
-        
-        print(f"SUCCESS! Layer created: {layer_full_name}")
+
+        print(f"SUCCESS! Layer created/updated: {layer_full_name}")
         print(f"Preview: {preview_url}")
 
         return JsonResponse({
@@ -843,7 +953,8 @@ def idw_interpolation(request, attribute):
                 'interpolated_pixels': int(interpolated_pixels),
                 'value_range': f"{np.nanmin(raster):.2f} to {np.nanmax(raster):.2f}",
                 'file_size_kb': f"{raster_size/1024:.1f}",
-                'preview_url': preview_url
+                'preview_url': preview_url,
+                'point_density': f"{point_density:.1f} pts/km²"
             }
         })
         

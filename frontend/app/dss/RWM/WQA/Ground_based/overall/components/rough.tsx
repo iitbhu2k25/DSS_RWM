@@ -1096,3 +1096,676 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
   };
 
   export default MapComponent;
+
+
+
+
+
+        backgroundColor: typeColors[type],
+        borderColor: borderColors[type],
+        borderWidth: 2,
+        barPercentage: 0.8,
+
+
+
+
+
+
+
+
+
+
+
+
+
+  'use client';
+import React, { useState, useEffect } from 'react';
+import { Bar } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend } from 'chart.js';
+import MapComponent from './omap';
+import annotationPlugin from 'chartjs-plugin-annotation'
+
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, annotationPlugin);
+
+interface WaterQualityData {
+  location?: string;
+  sampling?: string;
+  latitude?: number;
+  longitude?: number;
+  ph?: string | number;
+  tds?: string | number;
+  ec?: string | number;
+  temperature?: string | number;
+  turbidity?: string | number;
+  do?: string | number;
+  orp?: string | number;
+  tss?: string | number;
+  cod?: string | number;
+  bod?: string | number;
+  ts?: string | number;
+  chloride?: string | number;
+  nitrate?: string | number;
+  hardness?: string | number;
+  faecal_coliform?: string | number;
+  total_coliform?: string | number;
+  subdistrict_code?: string | number;
+  sub_district?: string; // Added sub-district name field
+  status?: string;
+}
+
+interface LocationItem {
+  id: number;
+  name: string;
+}
+
+interface District extends LocationItem {
+  stateId: number;
+}
+
+interface Sub_District extends LocationItem {
+  districtId: number;
+  districtName: string;
+}
+
+const Dashboard = () => {
+  const [csvData, setCsvData] = useState<WaterQualityData[]>([]);
+  const [filteredData, setFilteredData] = useState<WaterQualityData[]>([]);
+  const [selectedAttribute, setSelectedAttribute] = useState<string>('ph');
+  const [loading, setLoading] = useState<boolean>(true);
+  const [error, setError] = useState<string | null>(null);
+  const [states, setStates] = useState<LocationItem[]>([]);
+  const [districts, setDistricts] = useState<District[]>([]);
+  const [subDistricts, setSubDistricts] = useState<Sub_District[]>([]);
+  const [selectedState, setSelectedState] = useState<string>('');
+  const [selectedDistricts, setSelectedDistricts] = useState<string[]>([]);
+  const [selectedSubDistricts, setSelectedSubDistricts] = useState<string[]>([]);
+
+  const attributes = [
+    'ph', 'tds', 'ec', 'temperature', 'turbidity', 'do', 'orp', 'tss', 'cod',
+    'bod', 'ts', 'chloride', 'nitrate', 'hardness', 'faecal_coliform', 'total_coliform'
+  ];
+
+  const attributeLabels: Record<string, string> = {
+    ph: 'pH',
+    tds: 'TDS (mg/L)',
+    ec: 'EC (μS/cm)',
+    temperature: 'Temperature (°C)',
+    turbidity: 'Turbidity (FNU)',
+    do: 'DO (mg/L)',
+    orp: 'ORP',
+    tss: 'TSS (mg/l)',
+    cod: 'COD (mg/L)',
+    bod: 'BOD (mg/l)',
+    ts: 'TS (mg/L)',
+    chloride: 'Chloride (mg/l)',
+    nitrate: 'Nitrate (mg/L)',
+    hardness: 'Hardness (mg/l)',
+    faecal_coliform: 'Faecal Coliform (CFU/100 mL)',
+    total_coliform: 'Total Coliform (CFU/100 mL)',
+  };
+
+  // Define standard WHO/BIS water quality thresholds for reference lines
+  const qualityThresholds: Record<string, number> = {
+    ph: 8.5, // WHO upper limit
+    tds: 500, // WHO limit
+    temperature: 25, // General guideline
+    turbidity: 1, // WHO limit for treated water
+    do: 5, // Minimum for aquatic life
+    chloride: 250, // WHO limit
+    nitrate: 50, // WHO limit
+    hardness: 300, // WHO limit
+  };
+
+  const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://172.29.192.1:9000';
+
+  // Fetch states
+  useEffect(() => {
+    const fetchStates = async (): Promise<void> => {
+      try {
+        const response = await fetch('/basics/state/');
+        if (!response.ok) {
+          throw new Error(`HTTP error! Status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('API response data:', data);
+        const stateData: LocationItem[] = data.map((state: any) => ({
+          id: state.state_code,
+          name: state.state_name
+        }));
+
+        setStates(stateData);
+      } catch (error) {
+        console.error('Error fetching states:', error);
+      }
+    };
+    fetchStates();
+  }, []);
+
+  // Fetch districts when state changes
+  useEffect(() => {
+    if (selectedState) {
+      const fetchDistricts = async (): Promise<void> => {
+        console.log('Fetching districts for state:', selectedState);
+        try {
+          const response = await fetch('/basics/district/',
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ state_code: selectedState }),
+            }
+          );
+          const data = await response.json();
+          console.log('API response data:', data);
+          const districtData: LocationItem[] = data.map((district: any) => ({
+            id: district.district_code,
+            name: district.district_name
+          }));
+          const mappedDistricts: District[] = districtData.map(district => ({
+            ...district,
+            stateId: parseInt(selectedState)
+          }));
+
+          // Sort districts alphabetically
+          const sortedDistricts = [...mappedDistricts].sort((a, b) =>
+            a.name.localeCompare(b.name)
+          );
+
+          setDistricts(sortedDistricts);
+          setSelectedDistricts([]);
+        } catch (error) {
+          console.error('Error fetching districts:', error);
+        }
+      };
+      fetchDistricts();
+    } else {
+      setDistricts([]);
+      setSelectedDistricts([]);
+    }
+    // Reset dependent dropdowns
+    setSubDistricts([]);
+    setSelectedSubDistricts([]);
+  }, [selectedState]);
+
+  // Fetch sub-districts when districts change
+  useEffect(() => {
+    if (selectedDistricts.length > 0) {
+      const fetchSubDistricts = async (): Promise<void> => {
+        try {
+          console.log('Fetching sub-districts for districts:', selectedDistricts);
+          
+          const response = await fetch(`${BACKEND_URL}/rwm/subdistricts/`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ District_Code: selectedDistricts }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          const data = await response.json();
+          console.log('Sub-districts API response:', data);
+
+          if (data.error) {
+            console.error('API returned error:', data.error);
+            setError(`Failed to fetch sub-districts: ${data.error}`);
+            return;
+          }
+
+          if (!Array.isArray(data)) {
+            console.error('Expected array but got:', typeof data, data);
+            setError('Invalid response format for sub-districts');
+            return;
+          }
+
+          const districtMap = new Map(
+            districts.map(district => [district.id.toString(), district.name])
+          );
+
+          const subDistrictData: Sub_District[] = data.map((subDistrict: any) => {
+            const districtId = subDistrict.district_code.toString();
+            return {
+              id: subDistrict.subdistrict_code,
+              name: subDistrict.subdistrict_name,
+              districtId: parseInt(districtId),
+              districtName: districtMap.get(districtId) || 'Unknown District'
+            };
+          });
+
+          const sortedSubDistricts = [...subDistrictData].sort((a, b) => {
+            const districtComparison = a.districtName.localeCompare(b.districtName);
+            if (districtComparison !== 0) {
+              return districtComparison;
+            }
+            return a.name.localeCompare(b.name);
+          });
+
+          setSubDistricts(sortedSubDistricts);
+          setSelectedSubDistricts([]);
+          setError(null);
+          
+        } catch (error) {
+          console.error('Error fetching sub-districts:', error);
+          setSubDistricts([]);
+          setSelectedSubDistricts([]);
+        }
+      };
+      fetchSubDistricts();
+    } else {
+      setSubDistricts([]);
+      setSelectedSubDistricts([]);
+    }
+  }, [selectedDistricts, districts]);
+
+  // Fetch all water quality data on component mount
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`${BACKEND_URL}/rwm/water_quality/`);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        setCsvData(data);
+        setFilteredData(data);
+        setError(null);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        setError('Failed to fetch water quality data');
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchData();
+  }, []);
+
+  // Filter data based on selected subdistricts
+  useEffect(() => {
+    if (selectedSubDistricts.length > 0) {
+      const filtered = csvData.filter(row => {
+        const rowSubdistrictCode = row.subdistrict_code?.toString();
+        return rowSubdistrictCode && selectedSubDistricts.includes(rowSubdistrictCode);
+      });
+      setFilteredData(filtered);
+      console.log('Filtered data for selected sub-districts:', filtered);
+    } else {
+      setFilteredData(csvData);
+    }
+  }, [selectedSubDistricts, csvData]);
+
+  // Event handlers
+  const handleStateChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
+    const stateCode = e.target.value;
+    setSelectedState(stateCode);
+    setSelectedDistricts([]);
+    setSelectedSubDistricts([]);
+  };
+
+  const handleDistrictChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
+    const districtIds = Array.from(e.target.selectedOptions, option => option.value);
+    setSelectedDistricts(districtIds);
+    setSelectedSubDistricts([]);
+  };
+
+  const handleSubDistrictChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
+    const subDistrictIds = Array.from(e.target.selectedOptions, option => option.value);
+    setSelectedSubDistricts(subDistrictIds);
+  };
+
+  const parseValue = (value: string | number | null | undefined): number => {
+    if (value === null || value === undefined || value === '') return 0;
+    if (typeof value === 'string') {
+      // Handle scientific notation and comma separators
+      const cleaned = value.replace(/,/g, '').trim();
+      if (cleaned.includes('E+') || cleaned.includes('e+')) {
+        return parseFloat(cleaned) || 0;
+      }
+      return parseFloat(cleaned) || 0;
+    }
+    return parseFloat(value.toString()) || 0;
+  };
+
+  // Define colors for each location type
+  const typeColors: Record<string, string> = {
+    Drain: 'rgba(255, 99, 132, 0.7)', // Red for drains (potentially polluted)
+    Upstream: 'rgba(54, 162, 235, 0.7)', // Blue for upstream
+    Downstream: 'rgba(255, 159, 64, 0.7)', // Orange for downstream
+    'Below Bridge': 'rgba(255, 206, 86, 0.7)', // Yellow for below bridge
+  };
+
+  const borderColors: Record<string, string> = {
+    Drain: 'rgba(255, 99, 132, 1)',
+    Upstream: 'rgba(54, 162, 235, 1)',
+    Downstream: 'rgba(255, 159, 64, 1)',
+    'Below Bridge': 'rgba(255, 206, 86, 1)',
+  };
+
+  const createChartData = () => {
+    if (filteredData.length === 0) {
+      return { labels: [], datasets: [] };
+    }
+
+    // Group data by sampling location
+    const groupedBySampling = filteredData.reduce((acc, row) => {
+      const sampling = row.sampling || 'Unknown Location';
+      if (!acc[sampling]) {
+        acc[sampling] = [];
+      }
+      acc[sampling].push(row);
+      return acc;
+    }, {} as Record<string, WaterQualityData[]>);
+
+    const samplingLocations = Object.keys(groupedBySampling).sort();
+    
+    // Get unique location types from the filtered data
+    const locationTypes = [...new Set(filteredData.map(row => row.location || 'Unknown'))].sort();
+
+    const datasets = locationTypes.map((locationType) => ({
+      label: locationType,
+      data: samplingLocations.map(sampling => {
+        const matchingRows = groupedBySampling[sampling].filter(row => row.location === locationType);
+        if (matchingRows.length === 0) return null;
+        
+        // If multiple rows for same location type at same sampling point, take average
+        const values = matchingRows.map(row => parseValue(row[selectedAttribute as keyof WaterQualityData]));
+        const validValues = values.filter(v => v > 0);
+        return validValues.length > 0 ? validValues.reduce((a, b) => a + b, 0) / validValues.length : null;
+      }),
+      backgroundColor: typeColors[locationType] || 'rgba(128, 128, 128, 0.7)',
+      borderColor: borderColors[locationType] || 'rgba(128, 128, 128, 1)',
+      borderWidth: 2,
+      barPercentage: 0.8,
+      categoryPercentage: 0.9,
+    }));
+
+    return {
+      labels: samplingLocations,
+      datasets: datasets.filter(dataset => dataset.data.some(value => value !== null))
+    };
+  };
+
+  const chartData = createChartData();
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { 
+        position: 'top' as const,
+        labels: {
+          filter: (legendItem: any, chartData: any) => {
+            // Only show legend items that have data
+            const datasetIndex = legendItem.datasetIndex;
+            const dataset = chartData.datasets[datasetIndex];
+            return dataset.data.some((value: any) => value !== null && value > 0);
+          }
+        }
+      },
+      title: { 
+        display: true, 
+        text: `${attributeLabels[selectedAttribute]} by Sampling Location${selectedSubDistricts.length > 0 ? ' (Filtered by Sub-District)' : ''}`
+      },
+      annotation: qualityThresholds[selectedAttribute] ? {
+        annotations: {
+          threshold: {
+            type: 'line',
+            yMin: qualityThresholds[selectedAttribute],
+            yMax: qualityThresholds[selectedAttribute],
+            borderColor: 'red',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            label: {
+              content: `WHO/BIS Limit: ${qualityThresholds[selectedAttribute]}`,
+              enabled: true,
+              position: 'end'
+            }
+          }
+        }
+      } : {}
+    },
+    scales: {
+      y: { 
+        beginAtZero: true, 
+        title: { 
+          display: true, 
+          text: attributeLabels[selectedAttribute] 
+        }
+      },
+      x: {
+        title: { display: true, text: 'Sampling Location' },
+        ticks: {
+          autoSkip: false,
+          maxRotation: 45,
+          minRotation: 0,
+          callback: function(value: any, index: any) {
+            const label = this.getLabelForValue(value);
+            return label.length > 20 ? label.substring(0, 20) + '...' : label;
+          }
+        },
+      },
+    },
+    interaction: {
+      intersect: false,
+      mode: 'index' as const,
+    },
+    elements: {
+      bar: {
+        borderRadius: 4,
+      }
+    }
+  };
+
+  // Calculate basic statistics for the selected attribute
+  const calculateStats = () => {
+    if (filteredData.length === 0) return null;
+    
+    const values = filteredData
+      .map(row => parseValue(row[selectedAttribute as keyof WaterQualityData]))
+      .filter(v => v > 0);
+    
+    if (values.length === 0) return null;
+    
+    const sum = values.reduce((a, b) => a + b, 0);
+    const avg = sum / values.length;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    
+    return { avg: avg.toFixed(2), min: min.toFixed(2), max: max.toFixed(2), count: values.length };
+  };
+
+  const stats = calculateStats();
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-lg">Loading water quality data...</div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex items-center justify-center h-screen">
+        <div className="text-lg text-red-600">Error: {error}</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-screen">
+      <div className="w-full p-4 overflow-y-auto">
+        {/* Location Selection Dropdowns */}
+        <div className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+          {/* State Dropdown */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              State
+            </label>
+            <select
+              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              value={selectedState}
+              onChange={handleStateChange}
+            >
+              <option value="">Select State</option>
+              {states.map((state) => (
+                <option key={state.id} value={state.id}>
+                  {state.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* District Dropdown */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              District
+            </label>
+            <select
+              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              multiple
+              size={4}
+              value={selectedDistricts}
+              onChange={handleDistrictChange}
+              disabled={!selectedState}
+            >
+              {districts.map((district) => (
+                <option key={district.id} value={district.id}>
+                  {district.name}
+                </option>
+              ))}
+            </select>
+            <small className="text-gray-500">Hold Ctrl/Cmd to select multiple</small>
+          </div>
+
+          {/* Sub-District Dropdown */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Sub-District
+            </label>
+            <select
+              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              multiple
+              size={4}
+              value={selectedSubDistricts}
+              onChange={handleSubDistrictChange}
+              disabled={selectedDistricts.length === 0}
+            >
+              {subDistricts.map((subDistrict) => (
+                <option key={subDistrict.id} value={subDistrict.id}>
+                  {subDistrict.name} ({subDistrict.districtName})
+                </option>
+              ))}
+            </select>
+            <small className="text-gray-500">Hold Ctrl/Cmd to select multiple</small>
+          </div>
+
+          {/* Attribute Selection */}
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Water Quality Parameter
+            </label>
+            <select
+              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              value={selectedAttribute}
+              onChange={(e) => setSelectedAttribute(e.target.value)}
+            >
+              {attributes.map((attr) => (
+                <option key={attr} value={attr}>
+                  {attributeLabels[attr]}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+
+        {/* Data Summary and Statistics */}
+        <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-3 bg-gray-100 rounded-md">
+            <p className="text-sm text-gray-700">
+              <strong>Data Summary:</strong> {filteredData.length} records
+              {selectedSubDistricts.length > 0 && (
+                <span className="ml-2 text-blue-600">
+                  (Filtered by {selectedSubDistricts.length} sub-district{selectedSubDistricts.length > 1 ? 's' : ''})
+                </span>
+              )}
+            </p>
+            {selectedSubDistricts.length > 0 && (
+              <p className="text-sm text-gray-600 mt-1">
+                Selected Sub-Districts: {subDistricts
+                  .filter(sd => selectedSubDistricts.includes(sd.id.toString()))
+                  .map(sd => sd.name)
+                  .join(', ')}
+              </p>
+            )}
+          </div>
+          
+          {stats && (
+            <div className="p-3 bg-blue-50 rounded-md">
+              <p className="text-sm text-gray-700">
+                <strong>{attributeLabels[selectedAttribute]} Statistics:</strong>
+              </p>
+              <div className="grid grid-cols-4 gap-2 mt-1 text-xs">
+                <span>Avg: <strong>{stats.avg}</strong></span>
+                <span>Min: <strong>{stats.min}</strong></span>
+                <span>Max: <strong>{stats.max}</strong></span>
+                <span>Count: <strong>{stats.count}</strong></span>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Chart */}
+        <div className="h-96 w-full mb-6">
+          {chartData.labels.length > 0 ? (
+            <Bar data={chartData} options={chartOptions} />
+          ) : (
+            <div className="flex items-center justify-center h-full bg-gray-50 rounded-md">
+              <p className="text-gray-500">No data available for the selected filters</p>
+            </div>
+          )}
+        </div>
+
+        {/* Data Table for Selected Sub-Districts */}
+        {selectedSubDistricts.length > 0 && filteredData.length > 0 && (
+          <div className="mt-6">
+            <h3 className="text-lg font-semibold mb-3">Detailed Data for Selected Sub-Districts</h3>
+            <div className="overflow-x-auto bg-white rounded-lg shadow">
+              <table className="min-w-full table-auto">
+                <thead className="bg-gray-50">
+                  <tr>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sub-District</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Sampling Location</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Location Type</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">{attributeLabels[selectedAttribute]}</th>
+                  </tr>
+                </thead>
+                <tbody className="bg-white divide-y divide-gray-200">
+                  {filteredData.map((row, index) => (
+                    <tr key={index} className="hover:bg-gray-50">
+                      <td className="px-4 py-2 text-sm text-gray-900">{row.sub_district || 'N/A'}</td>
+                      <td className="px-4 py-2 text-sm text-gray-900">{row.sampling || 'N/A'}</td>
+                      <td className="px-4 py-2 text-sm text-gray-900">{row.location || 'N/A'}</td>
+                      <td className="px-4 py-2 text-sm text-gray-900">{row.status || 'N/A'}</td>
+                      <td className="px-4 py-2 text-sm text-gray-900 font-medium">
+                        {parseValue(row[selectedAttribute as keyof WaterQualityData]).toFixed(2)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+export default Dashboard;

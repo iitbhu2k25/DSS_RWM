@@ -40,7 +40,7 @@ interface District extends LocationItem {
   stateId: number;
 }
 
-interface SubDistrict extends LocationItem {
+interface Sub_District extends LocationItem {
   districtId: number;
   districtName: string;
 }
@@ -53,7 +53,7 @@ const Dashboard = () => {
   const [error, setError] = useState<string | null>(null);
   const [states, setStates] = useState<LocationItem[]>([]);
   const [districts, setDistricts] = useState<District[]>([]);
-  const [subDistricts, setSubDistricts] = useState<SubDistrict[]>([]);
+  const [subDistricts, setSubDistricts] = useState<Sub_District[]>([]);
   const [selectedState, setSelectedState] = useState<string>('');
   const [selectedDistricts, setSelectedDistricts] = useState<string[]>([]);
   const [selectedSubDistricts, setSelectedSubDistricts] = useState<string[]>([]);
@@ -81,6 +81,21 @@ const Dashboard = () => {
     faecal_coliform: 'Faecal Coliform (CFU/100 mL)',
     total_coliform: 'Total Coliform (CFU/100 mL)',
   };
+
+  const qualityThresholds: Record<string, number> = {
+    ph: 8.5, // WHO upper limit
+    tds: 500, // WHO limit
+    temperature: 25, // General guideline
+    turbidity: 1, // WHO limit for treated water
+    do: 5, // Minimum for aquatic life
+    chloride: 250, // WHO limit
+    nitrate: 50, // WHO limit
+    hardness: 300, // WHO limit
+  };
+
+
+
+
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://172.29.192.1:9000';
 
@@ -156,28 +171,49 @@ const Dashboard = () => {
   }, [selectedState]);
 
   // Fetch sub-districts when districts change
+  // Updated useEffect for fetching sub-districts
   useEffect(() => {
     if (selectedDistricts.length > 0) {
       const fetchSubDistricts = async (): Promise<void> => {
         try {
-          const response = await fetch('/basics/subdistrict/',
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ district_code: selectedDistricts }),
-            }
-          );
+          console.log('Fetching sub-districts for districts:', selectedDistricts);
+
+          // Use the new sub-districts endpoint instead of water_quality
+          const response = await fetch(`${BACKEND_URL}/rwm/subdistricts/`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ District_Code: selectedDistricts }),
+          });
+
+          if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
           const data = await response.json();
-          console.log('API response data:', data);
+          console.log('Sub-districts API response:', data);
+
+          // Check if the response indicates an error
+          if (data.error) {
+            console.error('API returned error:', data.error);
+            setError(`Failed to fetch sub-districts: ${data.error}`);
+            return;
+          }
+
+          // Ensure data is an array
+          if (!Array.isArray(data)) {
+            console.error('Expected array but got:', typeof data, data);
+            setError('Invalid response format for sub-districts');
+            return;
+          }
 
           // Create a map of district IDs to names for reference
           const districtMap = new Map(
             districts.map(district => [district.id.toString(), district.name])
           );
 
-          const subDistrictData: SubDistrict[] = data.map((subDistrict: any) => {
+          const subDistrictData: Sub_District[] = data.map((subDistrict: any) => {
             const districtId = subDistrict.district_code.toString();
             return {
               id: subDistrict.subdistrict_code,
@@ -198,8 +234,14 @@ const Dashboard = () => {
 
           setSubDistricts(sortedSubDistricts);
           setSelectedSubDistricts([]);
+          setError(null); // Clear any previous errors
+
         } catch (error) {
           console.error('Error fetching sub-districts:', error);
+          // setError(`Failed to fetch sub-districts: ${error.message}`);
+          // Reset sub-districts on error
+          setSubDistricts([]);
+          setSelectedSubDistricts([]);
         }
       };
       fetchSubDistricts();
@@ -209,41 +251,119 @@ const Dashboard = () => {
     }
   }, [selectedDistricts, districts]);
 
-  // Fetch all water quality data on component mount
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true);
-        const response = await fetch(`${BACKEND_URL}/rwm/water_quality/`);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        const data = await response.json();
-        setCsvData(data);
-        setFilteredData(data); // Initially show all data
-        setError(null);
-      } catch (error) {
-        console.error('Error fetching data:', error);
-        setError('Failed to fetch water quality data');
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchData();
-  }, []);
 
-  // Filter data based on selected subdistricts
+  // Alternative: Use GET request with query parameters
+// useEffect(() => {
+//   if (selectedDistricts.length > 0) {
+//     const fetchSubDistricts = async (): Promise<void> => {
+//       try {
+//         console.log('Fetching sub-districts for districts:', selectedDistricts);
+
+//         // Build URL with query parameters for GET request
+//         let url = `${BACKEND_URL}/rwm/subdistricts/`;
+//         if (selectedDistricts.length > 0) {
+//           const params = new URLSearchParams();
+//           selectedDistricts.forEach(code => params.append('district_code', code));
+//           url += `?${params.toString()}`;
+//         }
+        
+//         console.log('Request URL:', url);
+
+//         const response = await fetch(url, {
+//           method: 'GET',
+//           headers: {
+//             'Content-Type': 'application/json',
+//           },
+//         });
+
+//         console.log('Response status:', response.status);
+
+//         if (!response.ok) {
+//           const errorText = await response.text();
+//           console.error('Error response text:', errorText);
+//           throw new Error(`HTTP error! status: ${response.status}, response: ${errorText}`);
+//         }
+
+//         const data = await response.json();
+//         console.log('Sub-districts API response:', data);
+
+//         // Process the data same as before...
+//         // [rest of the processing logic remains the same]
+
+//       } catch (error) {
+//         console.error('Error fetching sub-districts:', error);
+//         // setError(`Failed to fetch sub-districts: ${error.message}`);
+//         setSubDistricts([]);
+//         setSelectedSubDistricts([]);
+//       }
+//     };
+//     fetchSubDistricts();
+//   } else {
+//     setSubDistricts([]);
+//     setSelectedSubDistricts([]);
+//   }
+// }, [selectedDistricts, districts]);
+
+
+  // Fetch all water quality data on component mount
+  // useEffect(() => {
+  //   const fetchData = async () => {
+  //     try {
+  //       setLoading(true);
+  //       const response = await fetch(`${BACKEND_URL}/rwm/water_quality/`);
+  //       if (!response.ok) {
+  //         throw new Error(`HTTP error! status: ${response.status}`);
+  //       }
+  //       const data = await response.json();
+  //       setCsvData(data);
+  //       setFilteredData(data); // Initially show all data
+  //       setError(null);
+  //     } catch (error) {
+  //       console.error('Error fetching data:', error);
+  //       setError('Failed to fetch water quality data');
+  //     } finally {
+  //       setLoading(false);
+  //     }
+  //   };
+  //   fetchData();
+  // }, []);
+
+
+
+
   useEffect(() => {
-    if (selectedSubDistricts.length > 0) {
-      const filtered = csvData.filter(row => {
-        const rowSubdistrictCode = row.subdistrict_code?.toString();
-        return rowSubdistrictCode && selectedSubDistricts.includes(rowSubdistrictCode);
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${BACKEND_URL}/rwm/water_quality/`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ Sub_District_Code: selectedSubDistricts }),
       });
-      setFilteredData(filtered);
-    } else {
-      setFilteredData(csvData); // Show all data if no subdistrict is selected
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      setCsvData(data);
+      setFilteredData(data); // Set filtered data to the fetched data
+      setError(null);
+    } catch (error) {
+      console.error('Error fetching data:', error);
+      setError('Failed to fetch water quality data');
+      setCsvData([]);
+      setFilteredData([]);
+    } finally {
+      setLoading(false);
     }
-  }, [selectedSubDistricts, csvData]);
+  };
+  fetchData();
+}, [selectedSubDistricts]); // Add selectedSubDistricts to dependencies
+
+
+
+
 
   // Event handlers
   const handleStateChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
@@ -280,14 +400,14 @@ const Dashboard = () => {
     Drain: 'rgba(255, 99, 132, 0.6)', // Red
     Upstream: 'rgba(54, 162, 235, 0.6)', // Blue
     Downstream: 'rgba(75, 192, 192, 0.6)', // Teal
-    'Below Bridge': 'rgba(255, 206, 86, 0.6)', // Yellow
+   
   };
 
   const borderColors: Record<string, string> = {
     Drain: 'rgba(255, 99, 132, 1)',
     Upstream: 'rgba(54, 162, 235, 1)',
     Downstream: 'rgba(75, 192, 192, 1)',
-    'Below Bridge': 'rgba(255, 206, 86, 1)',
+   
   };
 
   const createChartDataWithCustomSpacing = (spacingWidth = 2) => {
@@ -303,7 +423,7 @@ const Dashboard = () => {
 
     const samplingLocations = Object.keys(groupedBySampling);
     const labels: string[] = [];
-    
+
     // Create labels with custom spacing
     samplingLocations.forEach((sampling, index) => {
       labels.push(sampling);
@@ -320,7 +440,7 @@ const Dashboard = () => {
       label: type,
       data: labels.map(label => {
         if (label === '') return null; // No data for spacing labels
-        
+
         const matchingRow = groupedBySampling[label]?.find(row => row.location === type);
         return matchingRow ? parseValue(matchingRow[selectedAttribute as keyof WaterQualityData]) : null;
       }),
@@ -344,6 +464,25 @@ const Dashboard = () => {
     plugins: {
       legend: { position: 'top' as const },
       title: { display: true, text: attributeLabels[selectedAttribute] },
+      annotation: qualityThresholds[selectedAttribute] ? {
+        annotations: {
+          threshold: {
+            type: 'line',
+            yMin: qualityThresholds[selectedAttribute],
+            yMax: qualityThresholds[selectedAttribute],
+            borderColor: 'red',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            label: {
+              content: `WHO/BIS Limit: ${qualityThresholds[selectedAttribute]}`,
+              enabled: true,
+              position: 'end'
+            }
+          }
+        }
+      } : {}
+
+
     },
     scales: {
       y: { beginAtZero: true, title: { display: true, text: 'Value' } },
@@ -373,6 +512,27 @@ const Dashboard = () => {
       </div>
     );
   }
+
+  const calculateStats = () => {
+    if (filteredData.length === 0) return null;
+
+    const values = filteredData
+      .map(row => parseValue(row[selectedAttribute as keyof WaterQualityData]))
+      .filter(v => v > 0);
+
+    if (values.length === 0) return null;
+
+    const sum = values.reduce((a, b) => a + b, 0);
+    const avg = sum / values.length;
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+
+    return { avg: avg.toFixed(2), min: min.toFixed(2), max: max.toFixed(2), count: values.length };
+  };
+
+  const stats = calculateStats();
+
+
 
   return (
     <div className="flex h-screen">
@@ -460,7 +620,40 @@ const Dashboard = () => {
             </select>
           </div>
         </div>
+        <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-3 bg-gray-100 rounded-md">
+            <p className="text-sm text-gray-700">
+              <strong>Data Summary:</strong> {filteredData.length} records
+              {selectedSubDistricts.length > 0 && (
+                <span className="ml-2 text-blue-600">
+                  (Filtered by {selectedSubDistricts.length} sub-district{selectedSubDistricts.length > 1 ? 's' : ''})
+                </span>
+              )}
+            </p>
+            {selectedSubDistricts.length > 0 && (
+              <p className="text-sm text-gray-600 mt-1">
+                Selected Sub-Districts: {subDistricts
+                  .filter(sd => selectedSubDistricts.includes(sd.id.toString()))
+                  .map(sd => sd.name)
+                  .join(', ')}
+              </p>
+            )}
+          </div>
 
+          {stats && (
+            <div className="p-3 bg-blue-50 rounded-md">
+              <p className="text-sm text-gray-700">
+                <strong>{attributeLabels[selectedAttribute]} Statistics:</strong>
+              </p>
+              <div className="grid grid-cols-4 gap-2 mt-1 text-xs">
+                <span>Avg: <strong>{stats.avg}</strong></span>
+                <span>Min: <strong>{stats.min}</strong></span>
+                <span>Max: <strong>{stats.max}</strong></span>
+                <span>Count: <strong>{stats.count}</strong></span>
+              </div>
+            </div>
+          )}
+        </div>
         {/* Data Summary */}
         <div className="mb-4 p-3 bg-gray-100 rounded-md">
           <p className="text-sm text-gray-700">
@@ -474,7 +667,7 @@ const Dashboard = () => {
         </div>
 
         {/* Chart */}
-        <div className="h-96 w-1000">
+        <div className="h-120 w-500">
           <Bar data={chartData} options={chartOptions} />
         </div>
       </div>

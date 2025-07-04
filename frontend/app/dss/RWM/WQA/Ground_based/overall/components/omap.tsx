@@ -25,11 +25,11 @@ interface SamplingPointData {
   'LATITUDE'?: number;
   'LONGITUDE'?: number;
   'pH'?: number;
-  'TDS (ppm)'?: number;
-  'EC (μS/cm)'?: number;
-  'Temperature (°C)'?: number;
-  'Turbidity (FNU)'?: number;
-  'DO (mg/L)'?: number;
+  'TDS(ppm)'?: number;
+  'EC(μS/cm)'?: number;
+  'Temperature(°C)'?: number;
+  'Turbidity(FNU)'?: number;
+  'DO(mg/L)'?: number;
   'ORP'?: number;
   'TSS(mg/l)'?: number;
   'COD'?: number;
@@ -71,7 +71,7 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
   const [error, setError] = useState<string>('');
 
   const attributes = [
-    'pH', 'TDS (ppm)', 'EC (μS/cm)', 'Temperature (°C)', 'Turbidity (FNU)', 'DO (mg/L)', 'ORP',
+    'pH', 'TDS(ppm)', 'EC(μS/cm)', 'Temperature(°C)', 'Turbidity(FNU)', 'DO(mg/L)', 'ORP',
     'TSS(mg/l)', 'COD', 'BOD(mg/l)', 'TS_mg_l_', 'Chloride(mg/l)', 'Nitrate', 'Hardness(mg/l)',
     'Faecal Coliform (CFU/100 mL)', 'Total Coliform (CFU/100 mL)'
   ];
@@ -315,7 +315,7 @@ const MapComponent: React.FC<MapComponentProps> = ({ csvData, backendUrl = 'http
     // Trigger interpolation and add new WMS layer
     const fetchInterpolatedLayer = async () => {
       try {
-        const url = `${backendUrl}/rwm/interpolate/${encodeURIComponent(selectedLayer)}/`;
+        const url = `${backendUrl}/rwm/interpolate/${(selectedLayer)}/`;
         console.log('Fetching from URL:', url);
 
         const response = await fetch(url);

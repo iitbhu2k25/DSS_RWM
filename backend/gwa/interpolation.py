@@ -285,6 +285,8 @@ class InterpolateRasterView(APIView):
         weights = 1.0 / (distances ** power)
         
         # Handle infinite weights (points too far away)
+        # Normalize weights
+
         weights[np.isinf(weights)] = 0
         
         # Normalize weights

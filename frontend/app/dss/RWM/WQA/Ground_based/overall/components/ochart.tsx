@@ -83,19 +83,15 @@ const Dashboard = () => {
   };
 
   const qualityThresholds: Record<string, number> = {
-    ph: 8.5, // WHO upper limit
-    tds: 500, // WHO limit
-    temperature: 25, // General guideline
-    turbidity: 1, // WHO limit for treated water
-    do: 5, // Minimum for aquatic life
-    chloride: 250, // WHO limit
-    nitrate: 50, // WHO limit
-    hardness: 300, // WHO limit
+    ph: 8.5,
+    tds: 500,
+    temperature: 25, 
+    turbidity: 1,
+    do: 5, 
+    chloride: 250, 
+    nitrate: 50, 
+    hardness: 300, 
   };
-
-
-
-
 
   const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://172.29.192.1:9000';
 
@@ -171,7 +167,6 @@ const Dashboard = () => {
   }, [selectedState]);
 
   // Fetch sub-districts when districts change
-  // Updated useEffect for fetching sub-districts
   useEffect(() => {
     if (selectedDistricts.length > 0) {
       const fetchSubDistricts = async (): Promise<void> => {
@@ -251,119 +246,35 @@ const Dashboard = () => {
     }
   }, [selectedDistricts, districts]);
 
-
-  // Alternative: Use GET request with query parameters
-// useEffect(() => {
-//   if (selectedDistricts.length > 0) {
-//     const fetchSubDistricts = async (): Promise<void> => {
-//       try {
-//         console.log('Fetching sub-districts for districts:', selectedDistricts);
-
-//         // Build URL with query parameters for GET request
-//         let url = `${BACKEND_URL}/rwm/subdistricts/`;
-//         if (selectedDistricts.length > 0) {
-//           const params = new URLSearchParams();
-//           selectedDistricts.forEach(code => params.append('district_code', code));
-//           url += `?${params.toString()}`;
-//         }
-        
-//         console.log('Request URL:', url);
-
-//         const response = await fetch(url, {
-//           method: 'GET',
-//           headers: {
-//             'Content-Type': 'application/json',
-//           },
-//         });
-
-//         console.log('Response status:', response.status);
-
-//         if (!response.ok) {
-//           const errorText = await response.text();
-//           console.error('Error response text:', errorText);
-//           throw new Error(`HTTP error! status: ${response.status}, response: ${errorText}`);
-//         }
-
-//         const data = await response.json();
-//         console.log('Sub-districts API response:', data);
-
-//         // Process the data same as before...
-//         // [rest of the processing logic remains the same]
-
-//       } catch (error) {
-//         console.error('Error fetching sub-districts:', error);
-//         // setError(`Failed to fetch sub-districts: ${error.message}`);
-//         setSubDistricts([]);
-//         setSelectedSubDistricts([]);
-//       }
-//     };
-//     fetchSubDistricts();
-//   } else {
-//     setSubDistricts([]);
-//     setSelectedSubDistricts([]);
-//   }
-// }, [selectedDistricts, districts]);
-
-
-  // Fetch all water quality data on component mount
-  // useEffect(() => {
-  //   const fetchData = async () => {
-  //     try {
-  //       setLoading(true);
-  //       const response = await fetch(`${BACKEND_URL}/rwm/water_quality/`);
-  //       if (!response.ok) {
-  //         throw new Error(`HTTP error! status: ${response.status}`);
-  //       }
-  //       const data = await response.json();
-  //       setCsvData(data);
-  //       setFilteredData(data); // Initially show all data
-  //       setError(null);
-  //     } catch (error) {
-  //       console.error('Error fetching data:', error);
-  //       setError('Failed to fetch water quality data');
-  //     } finally {
-  //       setLoading(false);
-  //     }
-  //   };
-  //   fetchData();
-  // }, []);
-
-
-
-
   useEffect(() => {
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch(`${BACKEND_URL}/rwm/water_quality/`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ Sub_District_Code: selectedSubDistricts }),
-      });
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+    const fetchData = async () => {
+      try {
+        setLoading(true);
+        const response = await fetch(`${BACKEND_URL}/rwm/water_quality/`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ Sub_District_Code: selectedSubDistricts }),
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const data = await response.json();
+        setCsvData(data);
+        setFilteredData(data); // Set filtered data to the fetched data
+        setError(null);
+      } catch (error) {
+        console.error('Error fetching data:', error);
+        setError('Failed to fetch water quality data');
+        setCsvData([]);
+        setFilteredData([]);
+      } finally {
+        setLoading(false);
       }
-      const data = await response.json();
-      setCsvData(data);
-      setFilteredData(data); // Set filtered data to the fetched data
-      setError(null);
-    } catch (error) {
-      console.error('Error fetching data:', error);
-      setError('Failed to fetch water quality data');
-      setCsvData([]);
-      setFilteredData([]);
-    } finally {
-      setLoading(false);
-    }
-  };
-  fetchData();
-}, [selectedSubDistricts]); // Add selectedSubDistricts to dependencies
-
-
-
-
+    };
+    fetchData();
+  }, [selectedSubDistricts]); // Add selectedSubDistricts to dependencies
 
   // Event handlers
   const handleStateChange = (e: React.ChangeEvent<HTMLSelectElement>): void => {
@@ -400,14 +311,12 @@ const Dashboard = () => {
     Drain: 'rgba(255, 99, 132, 0.6)', // Red
     Upstream: 'rgba(54, 162, 235, 0.6)', // Blue
     Downstream: 'rgba(75, 192, 192, 0.6)', // Teal
-   
   };
 
   const borderColors: Record<string, string> = {
     Drain: 'rgba(255, 99, 132, 1)',
     Upstream: 'rgba(54, 162, 235, 1)',
     Downstream: 'rgba(75, 192, 192, 1)',
-   
   };
 
   const createChartDataWithCustomSpacing = (spacingWidth = 2) => {
@@ -455,8 +364,64 @@ const Dashboard = () => {
     return { labels, datasets };
   };
 
+  // New function to create average values chart
+  const createAverageChartData = () => {
+    // Group data by location type
+    const groupedByLocation = filteredData.reduce((acc, row) => {
+      const location = row.location || 'Unknown';
+      if (!acc[location]) {
+        acc[location] = [];
+      }
+      acc[location].push(row);
+      return acc;
+    }, {} as Record<string, WaterQualityData[]>);
+
+    // Calculate averages for each location type
+    const locationTypes = ['Drain', 'Upstream', 'Downstream'];
+    const averageData: number[] = [];
+
+    locationTypes.forEach(locationType => {
+      const locationData = groupedByLocation[locationType] || [];
+      if (locationData.length > 0) {
+        const values = locationData
+          .map(row => parseValue(row[selectedAttribute as keyof WaterQualityData]))
+          .filter(v => v > 0);
+        
+        if (values.length > 0) {
+          const sum = values.reduce((a, b) => a + b, 0);
+          const avg = sum / values.length;
+          averageData.push(avg);
+        } else {
+          averageData.push(0);
+        }
+      } else {
+        averageData.push(0);
+      }
+    });
+
+    return {
+      labels: locationTypes,
+      datasets: [{
+        label: `Average ${attributeLabels[selectedAttribute]}`,
+        data: averageData,
+        backgroundColor: [
+          'rgba(255, 99, 132, 0.6)', // Red for Drain
+          'rgba(54, 162, 235, 0.6)', // Blue for Upstream
+          'rgba(75, 192, 192, 0.6)', // Teal for Downstream
+        ],
+        borderColor: [
+          'rgba(255, 99, 132, 1)',
+          'rgba(54, 162, 235, 1)',
+          'rgba(75, 192, 192, 1)',
+        ],
+        borderWidth: 2,
+      }]
+    };
+  };
+
   // Usage:
   const chartData = createChartDataWithCustomSpacing(0);
+  const averageChartData = createAverageChartData();
 
   const chartOptions = {
     responsive: true,
@@ -481,8 +446,6 @@ const Dashboard = () => {
           }
         }
       } : {}
-
-
     },
     scales: {
       y: { beginAtZero: true, title: { display: true, text: 'Value' } },
@@ -492,6 +455,43 @@ const Dashboard = () => {
           autoSkip: false,
           maxRotation: 45,
           minRotation: 45,
+        },
+      },
+    },
+  };
+
+  const averageChartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    plugins: {
+      legend: { position: 'top' as const },
+      title: { display: true, text: `Average ${attributeLabels[selectedAttribute]} by Location Type` },
+      annotation: qualityThresholds[selectedAttribute] ? {
+        annotations: {
+          threshold: {
+            type: 'line',
+            yMin: qualityThresholds[selectedAttribute],
+            yMax: qualityThresholds[selectedAttribute],
+            borderColor: 'red',
+            borderWidth: 2,
+            borderDash: [5, 5],
+            label: {
+              content: `WHO/BIS Limit: ${qualityThresholds[selectedAttribute]}`,
+              enabled: true,
+              position: 'end'
+            }
+          }
+        }
+      } : {}
+    },
+    scales: {
+      y: { beginAtZero: true, title: { display: true, text: 'Average Value' } },
+      x: {
+        title: { display: true, text: 'Location Type' },
+        ticks: {
+          autoSkip: false,
+          maxRotation: 0,
+          minRotation: 0,
         },
       },
     },
@@ -532,20 +532,18 @@ const Dashboard = () => {
 
   const stats = calculateStats();
 
-
-
   return (
     <div className="flex h-screen">
       <div className="w-full p-4 overflow-y-auto">
         {/* Location Selection Dropdowns */}
-        <div className="mb-6 grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="mb-4 grid grid-cols-2 md:grid-cols-4 gap-15">
           {/* State Dropdown */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               State
             </label>
             <select
-              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              className="w-55 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               value={selectedState}
               onChange={handleStateChange}
             >
@@ -564,9 +562,7 @@ const Dashboard = () => {
               District
             </label>
             <select
-              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              // multiple
-              // size={4}
+              className="w-55 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               value={selectedDistricts}
               onChange={handleDistrictChange}
               disabled={!selectedState}
@@ -577,7 +573,6 @@ const Dashboard = () => {
                 </option>
               ))}
             </select>
-            <small className="text-gray-500">Hold Ctrl/Cmd to select multiple</small>
           </div>
 
           {/* Sub-District Dropdown */}
@@ -586,9 +581,7 @@ const Dashboard = () => {
               Sub-District
             </label>
             <select
-              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              // multiple
-              // size={4}
+              className="w-55 p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
               value={selectedSubDistricts}
               onChange={handleSubDistrictChange}
               disabled={selectedDistricts.length === 0}
@@ -599,27 +592,27 @@ const Dashboard = () => {
                 </option>
               ))}
             </select>
-            <small className="text-gray-500">Hold Ctrl/Cmd to select multiple</small>
-          </div>
-
-          {/* Attribute Selection */}
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Water Quality Parameter
-            </label>
-            <select
-              className="w-full p-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-              value={selectedAttribute}
-              onChange={(e) => setSelectedAttribute(e.target.value)}
-            >
-              {attributes.map((attr) => (
-                <option key={attr} value={attr}>
-                  {attributeLabels[attr]}
-                </option>
-              ))}
-            </select>
           </div>
         </div>
+
+        {/* Attribute Selection */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Water Quality Parameter
+          </label>
+          <select
+            className="w-55 p-2 mb-2 border border-gray-300 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            value={selectedAttribute}
+            onChange={(e) => setSelectedAttribute(e.target.value)}
+          >
+            {attributes.map((attr) => (
+              <option key={attr} value={attr}>
+                {attributeLabels[attr]}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="mb-4 grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="p-3 bg-gray-100 rounded-md">
             <p className="text-sm text-gray-700">
@@ -654,21 +647,24 @@ const Dashboard = () => {
             </div>
           )}
         </div>
-        {/* Data Summary */}
-        <div className="mb-4 p-3 bg-gray-100 rounded-md">
-          <p className="text-sm text-gray-700">
-            Showing data for: {filteredData.length} records
-            {selectedSubDistricts.length > 0 && (
-              <span className="ml-2 text-blue-600">
-                (Filtered by {selectedSubDistricts.length} sub-district{selectedSubDistricts.length > 1 ? 's' : ''})
-              </span>
-            )}
-          </p>
-        </div>
 
-        {/* Chart */}
-        <div className="h-120 w-500">
-          <Bar data={chartData} options={chartOptions} />
+        {/* Charts Container */}
+        <div className="space-y-8">
+          {/* Original Chart - Individual Sampling Locations */}
+          <div className="bg-white p-4 rounded-lg shadow w-full">
+            <h3 className="text-lg font-semibold mb-4">Individual Sampling Locations</h3>
+            <div className="h-120 w-500 ">
+              <Bar data={chartData} options={chartOptions} />
+            </div>
+          </div>
+
+          {/* New Chart - Average Values by Location Type */}
+          <div className="bg-white p-4 rounded-lg shadow">
+            <h3 className="text-lg font-semibold mb-4">Average Values by Location Type</h3>
+            <div className="h-96 w-full">
+              <Bar data={averageChartData} options={averageChartOptions} />
+            </div>
+          </div>
         </div>
       </div>
     </div>

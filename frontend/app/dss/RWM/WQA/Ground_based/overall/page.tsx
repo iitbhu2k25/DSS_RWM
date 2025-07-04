@@ -71,15 +71,15 @@ const Page = () => {
     </div>
   </header>
 <div className="flex flex-col md:flex-row gap-4 mt-4 mx-4">
-  <div className="w-full md:w-1/2 bg-white p-6 rounded-lg shadow-md">
+  <div className="w-full md:w-3/5 bg-white p-6 rounded-lg shadow-md">
     <Dashboard />
   </div>
-  <div className="w-full md:w-1/2 bg-white p-6 rounded-lg shadow-md">
+  <div className="w-full md:w-2/5 bg-white p-6 rounded-lg shadow-md">
     <MapComponent csvData={csvData} />
   </div>
 </div>
 </div>
-                );
+  );
 };
 
-                export default Page;
+ export default Page;
